@@ -38,22 +38,26 @@ Jarvis contacte Ollama à l’adresse `http://localhost:11434/api/chat`. Si votr
 
 ## Bibliothèques Python utiles
 
-Le dépôt ne fournit pas de fichier `requirements.txt` : les bibliothèques nécessaires dépendent notamment des fonctions utilisées. Voici les principales bibliothèques tierces utilisées par l’application ou utiles à ses outils :
+Les dépendances Python sont listées dans [`requirements.txt`](requirements.txt). Depuis la racine du dépôt, installez-les avec :
+
+```powershell
+python -m pip install -r requirements.txt
+```
 
 | Bibliothèque | Utilisation |
 |---|---|
-| `PyQt6`, `PyQt6-WebEngine` | Fenêtre de l’application et affichage du contenu formaté |
-| `requests` | Communication HTTP avec l’API locale d’Ollama |
+| `PyQt6`, `PyQt6-WebEngine` | Interface de bureau et affichage des réponses |
+| `requests` | Communication avec l’API locale d’Ollama |
 | `markdown-it-py`, `Pygments` | Rendu Markdown et coloration syntaxique |
-| `pyautogui`, `mss`, `Pillow` | Contrôle souris/clavier et capture d’écran |
-| `cadquery` | Création de modèles mécaniques 3D |
-| `pyvista` (et `vtk`) | Visualisation des modèles 3D |
-| `ddgs` | Recherche Web DuckDuckGo, si cette fonction est utilisée |
-| `pyperclip` | Assistance au collage de texte |
+| `PyAutoGUI`, `mss`, `Pillow` | Contrôle souris/clavier et capture d’écran |
 | `winotify` | Notifications Windows |
+| `cadquery` | Création de modèles mécaniques 3D |
+| `pyvista` | Visualisation des modèles 3D (installe VTK comme dépendance) |
+| `ddgs` | Recherche Web DuckDuckGo |
+| `pyperclip` | Assistance au collage de texte |
 | `pypdf`, `python-docx`, `openpyxl` | Lecture de fichiers PDF, Word et Excel |
 
-Certaines fonctions ne sont disponibles que si leur bibliothèque correspondante est installée. Les modules de la bibliothèque standard, comme `sqlite3`, ne nécessitent aucune installation supplémentaire. Pour voir les packages accessibles dans l’environnement Python de Jarvis, l’outil `list_python_packages()` peut être utilisé.
+Les bibliothèques des fonctions optionnelles peuvent être retirées de `requirements.txt` si ces fonctions ne sont pas utilisées. `sqlite3` fait partie de la bibliothèque standard de Python et ne nécessite pas d’installation. Pour consulter les packages accessibles dans l’environnement de Jarvis, utilisez l’outil `list_python_packages()`.
 
 ## Données locales
 

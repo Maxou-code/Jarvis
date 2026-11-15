@@ -1,0 +1,19 @@
+# Dependances principales de l'application
+PyQt6
+PyQt6-WebEngine
+requests
+PyAutoGUI
+mss
+Pillow
+winotify
+markdown-it-py
+Pygments
+
+# Outils et formats facultatifs
+cadquery
+pyvista
+ddgs
+pyperclip
+pypdf
+python-docx
+openpyxl
