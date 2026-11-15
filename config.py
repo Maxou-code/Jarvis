@@ -1,8 +1,10 @@
 from pathlib import Path
 import json
 
+# Votre modèle Ollama
 MODEL = "Jarvis-3.5"
-CONTENT_MAX_WIDTH = 1300   # largeur max de la conversation ET de la barre d'entrée
+
+CONTENT_MAX_WIDTH = 1300
 ENTRY_MAX_WIDTH = 950
 CONTENT_SIDE_MARGIN = 34
 URL = "http://localhost:11434/api/chat"
