@@ -14,14 +14,13 @@ Les réponses sont générées par un modèle local servi par **Ollama**. Le mod
 - Fonctions Windows telles que capture d’écran, contrôle de la souris et du clavier, notifications et ouverture d’applications.
 - Recherche Web facultative avec DuckDuckGo.
 
-## Captures d’écran
+## Interface
 
-Ajoutez les trois images dans `docs/images/` en utilisant les noms ci-dessous :
-
-| Interface générale | Graphe | Modèle 3D |
-|---|---|---|
-| ![Interface générale de Jarvis](docs/images/interface-generale.png) | ![Graphe affiché dans Jarvis](docs/images/graphe.png) | ![Modèle 3D affiché dans Jarvis](docs/images/modele-3d.png) |
-
+| Élément | Aperçu |
+|:---|:---:|
+| Interface générale | ![Interface générale de Jarvis](Images/Interface.png) |
+| Création de graphe | ![Graphe affiché dans Jarvis](Images/Graphe.png) |
+| Création de modèle 3D | ![Modèle 3D affiché dans Jarvis](Images/Modele3D.png) |
 ## Prérequis et lancement
 
 - Windows
