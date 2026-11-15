@@ -61,4 +61,4 @@ Jarvis crée son espace de travail dans `%USERPROFILE%\Jarvis_Workspace`. Il y c
 
 ## Licence
 
-Ce projet est distribué sous licence MIT. Consultez le fichier `LICENSE` pour plus de détails.
+Ce projet est distribué sous aucune licence.
