@@ -7,6 +7,7 @@ Les réponses sont générées par un modèle local servi par **Ollama**. Le mod
 ## Fonctionnalités
 
 - Conversation avec un modèle local via l’API Ollama, avec réponses en continu et appels d’outils.
+- Historique local des conversations, consultable dans une barre latérale repliable.
 - Interface graphique de bureau construite avec PyQt6.
 - Calculs, base de connaissances locale et gestion de fichiers dans un espace de travail dédié.
 - Création de graphiques intégrés à la conversation.
@@ -59,9 +60,13 @@ python -m pip install -r requirements.txt
 
 Les bibliothèques des fonctions optionnelles peuvent être retirées de `requirements.txt` si ces fonctions ne sont pas utilisées. `sqlite3` fait partie de la bibliothèque standard de Python et ne nécessite pas d’installation. Pour consulter les packages accessibles dans l’environnement de Jarvis, utilisez l’outil `list_python_packages()`.
 
+Un aide-mémoire pour créer des pièces avec CadQuery est disponible dans [`Docs/cadquery.md`](Docs/cadquery.md).
+
 ## Données locales
 
 Jarvis crée son espace de travail dans `%USERPROFILE%\Jarvis_Workspace`. Il y conserve notamment les fichiers de travail, les sauvegardes, la configuration et la base de connaissances SQLite. Les recherches Web nécessitent Internet ; les échanges avec le modèle se font avec le serveur Ollama configuré localement.
+
+L’historique des conversations est enregistré localement dans `conversations.sqlite3`, dans ce même espace de travail.
 
 ## Licence
 

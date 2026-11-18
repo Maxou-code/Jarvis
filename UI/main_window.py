@@ -23,6 +23,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import ctypes
 import time
@@ -32,13 +33,14 @@ from ctypes import wintypes
 from pathlib import Path
 
 # Interface graphique
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QUrl, QSize
-from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QPixmap, QDesktopServices, QIcon, QSurfaceFormat, QImage
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QUrl, QSize, QEvent
+from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QDesktopServices, QIcon, QSurfaceFormat, QImage
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
     QSizePolicy, QFileDialog, QToolButton, QListWidget, QListWidgetItem,
-    QMessageBox, QDialog, QDialogButtonBox, QGridLayout
+    QMessageBox, QDialog, QDialogButtonBox, QGridLayout, QInputDialog, QMenu,
+    QSplitter
 )
 
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -103,13 +105,26 @@ from config import (
     ENTRY_MAX_WIDTH,
     MAX_ERROR_DETAILS,
     MODEL,
+    WORKSPACE,
 )
+from Core.agent import set_conversation_history
+from Core.conversations import ConversationStore
 from Core.paths import register_authorized_directory
 from UI.chart_view import InlineChart
 from UI.markdown_view import MarkdownWebView, render_markdown
+from UI.preview_panel import PreviewPanel
 from UI.viewer3d import Inline3DViewer
 from UI.widgets import MarkdownMessage, tool_details_to_markdown
 from UI.worker import AgentWorker
+
+
+class ConversationListWidget(QListWidget):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
 
 class JarvisWindow(QMainWindow):
     def __init__(self):
@@ -121,9 +136,11 @@ class JarvisWindow(QMainWindow):
         self.worker = None
         self.current_assistant_bubble = None
         self.current_response = ""
+        self._response_recorded = False
         self.current_response_view = None
         self.current_thinking_panel = None
         self.current_thinking = ""
+        self._thinking_recorded = False
         self._rendered_response = None
         self._rendered_thinking = None
         self._markdown_timer = QTimer(self)
@@ -131,6 +148,8 @@ class JarvisWindow(QMainWindow):
         self._markdown_timer.timeout.connect(self._flush_live_markdown)
         self.attachments = []
         self.message_widgets = []
+        self.conversation_store = ConversationStore(WORKSPACE / "conversations.sqlite3")
+        self.current_conversation = None
 
         self.setStyleSheet("""
             QMainWindow, QWidget#root {
@@ -144,6 +163,39 @@ class JarvisWindow(QMainWindow):
                 background: #07121B;
                 border: none;
                 border-bottom: 1px solid #087C9A;
+            }
+            QFrame#historySidebar {
+                background: #07121B;
+                border-right: 1px solid #145064;
+            }
+            QLabel#historyTitle {
+                color: #43BFD5;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 2px;
+            }
+            QListWidget#historyList {
+                background: transparent;
+                border: none;
+                color: #A6D3DC;
+                outline: none;
+            }
+            QListWidget#historyList::item {
+                background: #0A202B;
+                border: 1px solid #145064;
+                border-radius: 4px;
+                padding: 10px 9px;
+                margin: 3px 0;
+            }
+            QListWidget#historyList::item:hover {
+                background: #103746;
+                border-color: #20A9C8;
+                color: #FFFFFF;
+            }
+            QListWidget#historyList::item:selected {
+                background: #103746;
+                border-color: #20A9C8;
+                color: #FFFFFF;
             }
             QLabel#brand {
                 color: #DDFBFF;
@@ -306,6 +358,18 @@ class JarvisWindow(QMainWindow):
         top.setFixedHeight(72)
         top_layout = QHBoxLayout(top)
         top_layout.setContentsMargins(28, 12, 28, 12)
+        self.history_button = QPushButton("☰")
+        self.history_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.history_button.setToolTip("Afficher ou masquer l'historique")
+        self.history_button.setStyleSheet(
+            "QPushButton { background:#0B202B; color:#C6F7FF; border:1px solid #176078; "
+            "border-radius:4px; padding:8px 12px; font-size:18px; } "
+            "QPushButton:hover { background:#103746; }"
+        )
+        self.history_button.clicked.connect(self.toggle_history)
+        top_layout.addWidget(self.history_button)
+        top_layout.addSpacing(16)
+
         identity = QVBoxLayout()
         identity.setSpacing(1)
         brand = QLabel("JARVIS")
@@ -315,7 +379,9 @@ class JarvisWindow(QMainWindow):
         identity.addWidget(brand)
         identity.addWidget(sub)
         top_layout.addLayout(identity)
+
         top_layout.addStretch()
+
         self.folder_button = QPushButton("Dossiers autorisés")
         self.folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.folder_button.setToolTip("Ajouter un dossier accessible à JARVIS")
@@ -331,36 +397,63 @@ class JarvisWindow(QMainWindow):
         )
         top_layout.addWidget(self.status)
 
+        self.history_sidebar = QFrame()
+        self.history_sidebar.setObjectName("historySidebar")
+        self.history_sidebar.setFixedWidth(270)
+        history_layout = QVBoxLayout(self.history_sidebar)
+        history_layout.setContentsMargins(14, 18, 14, 14)
+        history_layout.setSpacing(12)
+        history_heading = QLabel("CONVERSATIONS")
+        history_heading.setObjectName("historyTitle")
+        history_layout.addWidget(history_heading)
+        self.new_conversation_button = QPushButton("+ Nouvelle conversation")
+        self.new_conversation_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_conversation_button.setStyleSheet(
+            "QPushButton { background:#0A202B; color:#8DEEFF; border:1px solid #145064; "
+            "border-radius:4px; padding:9px; text-align:left; } "
+            "QPushButton:hover { background:#103746; border-color:#20A9C8; }"
+        )
+        self.new_conversation_button.clicked.connect(self.new_conversation)
+        history_layout.addWidget(self.new_conversation_button)
+        self.history_list = ConversationListWidget()
+        self.history_list.setObjectName("historyList")
+        self.history_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_list.customContextMenuRequested.connect(self.show_conversation_menu)
+        self.history_list.currentItemChanged.connect(self.open_conversation)
+        history_layout.addWidget(self.history_list, 1)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         host = QWidget()
         host.setObjectName("messagesHost")
-        host.setMaximumWidth(CONTENT_MAX_WIDTH + 2 * CONTENT_SIDE_MARGIN)
         host.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Preferred,
         )
+        host_layout = QHBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.addStretch(1)
 
-        self.messages_layout = QVBoxLayout(host)
+        messages_column = QWidget(host)
+        messages_column.setObjectName("messagesColumn")
+        messages_column.setMinimumWidth(0)
+        messages_column.setMaximumWidth(CONTENT_MAX_WIDTH)
+        messages_column.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.messages_layout = QVBoxLayout(messages_column)
         self.messages_layout.setContentsMargins(CONTENT_SIDE_MARGIN, 24, CONTENT_SIDE_MARGIN, 24)
         self.messages_layout.setSpacing(14)
         self.messages_layout.addStretch(1)
+        host_layout.addWidget(messages_column, 10000)
+        host_layout.addStretch(1)
+        self.messages_host = messages_column
 
-        # Conteneur horizontal pour centrer le host
-        container = QWidget()
-        container.setObjectName("container")
-        container_layout = QHBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Colonne centrée : le host prend toute la largeur disponible jusqu'à son maximum.
-        container_layout.addStretch(1)
-        container_layout.addWidget(host, 2)
-        container_layout.addStretch(1)
-        self.messages_host = host
-
-        self.scroll.setWidget(container)
+        self.scroll.setWidget(host)
 
         # Défilement automatique tant que l'utilisateur reste en bas.
         self._autoscroll = True
@@ -378,7 +471,7 @@ class JarvisWindow(QMainWindow):
         bottom_layout = QVBoxLayout(bottom)
         self.bottom_layout = bottom_layout
         # Marge droite +14 : même bord droit que les bulles (qui réservent la barre de défilement).
-        bottom_layout.setContentsMargins(CONTENT_SIDE_MARGIN, 12, CONTENT_SIDE_MARGIN + 14, 12)
+        bottom_layout.setContentsMargins(CONTENT_SIDE_MARGIN, 12, CONTENT_SIDE_MARGIN, 12)
         bottom_layout.setSpacing(10)
 
         self.file_row = QListWidget()
@@ -452,9 +545,38 @@ class JarvisWindow(QMainWindow):
         composer_row.addStretch(1)
         bottom_layout.addLayout(composer_row)
 
-        main.addWidget(top, 0, 0)
-        main.addWidget(self.scroll, 1, 0)
-        main.addWidget(bottom, 2, 0)
+        conversation_area = QWidget(root)
+        conversation_layout = QVBoxLayout(conversation_area)
+        conversation_layout.setContentsMargins(0, 0, 0, 0)
+        conversation_layout.setSpacing(0)
+        conversation_layout.addWidget(self.scroll, 1)
+        conversation_layout.addWidget(bottom)
+
+        self.preview_panel = PreviewPanel(root)
+        self.preview_panel.close_requested.connect(self.close_preview)
+        self.preview_panel.hide()
+
+        self.preview_splitter = QSplitter(Qt.Orientation.Horizontal, root)
+        self.preview_splitter.setObjectName("previewSplitter")
+        self.preview_splitter.setHandleWidth(5)
+        self.preview_splitter.setStyleSheet(
+            "QSplitter#previewSplitter::handle:horizontal { background:#145064; }"
+        )
+        self.preview_splitter.addWidget(conversation_area)
+        self.preview_splitter.addWidget(self.preview_panel)
+        self.preview_splitter.setStretchFactor(0, 1)
+        self.preview_splitter.setStretchFactor(1, 0)
+        self.preview_splitter.setCollapsible(0, False)
+        self.preview_splitter.setCollapsible(1, True)
+        self.preview_splitter.splitterMoved.connect(
+            lambda _position, _index: QTimer.singleShot(
+                0, self._refresh_content_widths
+            )
+        )
+
+        main.addWidget(top, 0, 0, 1, 2)
+        main.addWidget(self.history_sidebar, 1, 0, 2, 1)
+        main.addWidget(self.preview_splitter, 1, 1, 2, 1)
 
         self.bottom_widget = bottom
         self.composer = composer
@@ -462,7 +584,194 @@ class JarvisWindow(QMainWindow):
         main.setRowStretch(0, 0)
         main.setRowStretch(1, 1)
         main.setRowStretch(2, 0)
-        main.setColumnStretch(0, 1)
+        main.setColumnStretch(0, 0)
+        main.setColumnStretch(1, 1)
+
+        self._activate_conversation(self.conversation_store.create())
+
+    def toggle_history(self):
+        self.history_sidebar.setVisible(not self.history_sidebar.isVisible())
+        QTimer.singleShot(0, self._refresh_content_widths)
+
+    def open_preview(self, kind, data):
+        sizes = self.preview_splitter.sizes()
+        was_collapsed = self.preview_panel.isHidden() or not sizes or sizes[1] == 0
+        self.preview_panel.show_content(kind, data)
+        self.preview_panel.show()
+        if was_collapsed:
+            total_width = self.preview_splitter.width()
+            panel_width = min(520, max(320, total_width // 3))
+            self.preview_splitter.setSizes(
+                [max(300, total_width - panel_width), panel_width]
+            )
+        QTimer.singleShot(0, self._refresh_content_widths)
+
+    def close_preview(self):
+        self.preview_panel.clear_content()
+        self.preview_panel.hide()
+        QTimer.singleShot(0, self._refresh_content_widths)
+
+    def _refresh_conversation_list(self):
+        selected_id = self.current_conversation["id"] if self.current_conversation else None
+        self.history_list.blockSignals(True)
+        self.history_list.clear()
+        selected_item = None
+        for conversation in self.conversation_store.list_conversations():
+            width = min(
+                self.history_list.viewport().width(),
+                self.history_sidebar.width() - 28,
+            ) - 36
+            title = QFontMetrics(self.history_list.font()).elidedText(
+                conversation["title"],
+                Qt.TextElideMode.ElideRight,
+                max(80, width),
+            )
+            item = QListWidgetItem(title)
+            item.setToolTip(conversation["title"])
+            item.setData(Qt.ItemDataRole.UserRole, conversation["id"])
+            self.history_list.addItem(item)
+            if conversation["id"] == selected_id:
+                selected_item = item
+        if selected_item is not None:
+            self.history_list.setCurrentItem(selected_item)
+        self.history_list.blockSignals(False)
+
+    def show_conversation_menu(self, position):
+        item = self.history_list.itemAt(position)
+        if item is None:
+            return
+        conversation_id = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        rename_action = menu.addAction("Renommer")
+        delete_action = menu.addAction("Supprimer")
+        action = menu.exec(self.history_list.mapToGlobal(position))
+        if action == rename_action:
+            self.rename_conversation(conversation_id)
+        elif action == delete_action:
+            self.delete_conversation(conversation_id)
+
+    def rename_conversation(self, conversation_id):
+        conversation = self.conversation_store.get(conversation_id)
+        if conversation is None:
+            return
+        title, accepted = QInputDialog.getText(
+            self,
+            "Renommer la conversation",
+            "Nouveau nom :",
+            text=conversation["title"],
+        )
+        if not accepted or not title.strip():
+            return
+        try:
+            title = self.conversation_store.rename(conversation_id, title)
+        except (sqlite3.Error, KeyError, ValueError) as exc:
+            QMessageBox.warning(self, "Renommage impossible", str(exc))
+            return
+        if self.current_conversation["id"] == conversation_id:
+            self.current_conversation["title"] = title
+        self._refresh_conversation_list()
+
+    def delete_conversation(self, conversation_id):
+        conversation = self.conversation_store.get(conversation_id)
+        if conversation is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Supprimer la conversation",
+            f"Supprimer « {conversation['title']} » ? Cette action est irréversible.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.conversation_store.delete(conversation_id)
+        except (sqlite3.Error, KeyError) as exc:
+            QMessageBox.warning(self, "Suppression impossible", str(exc))
+            return
+        if self.current_conversation["id"] == conversation_id:
+            self._activate_conversation(self.conversation_store.create())
+        else:
+            self._refresh_conversation_list()
+
+    def _activate_conversation(self, conversation):
+        if conversation is None:
+            return
+        self.current_conversation = conversation
+        set_conversation_history(conversation["messages"])
+        self.input.clear()
+        self.attachments.clear()
+        self._refresh_attachment_row()
+        self._clear_messages()
+        for message in conversation["messages"]:
+            role = message.get("role")
+            if role == "user":
+                self.current_assistant_bubble = None
+                self.add_message(message["content"], "user")
+            elif role == "assistant":
+                self.ensure_assistant_bubble().add_markdown_block(message["content"])
+            elif role == "thinking":
+                panel = self.ensure_assistant_bubble().add_panel(
+                    "Réflexion du modèle", expanded=True, max_height=None
+                )
+                panel.set_markdown(message["content"])
+            elif role == "system":
+                self.add_system_panel(
+                    message["title"], message["details"],
+                    expanded=message.get("expanded", False),
+                )
+            elif role == "chart":
+                self.ensure_assistant_bubble().add_chart(message["data"])
+            elif role == "model3d":
+                try:
+                    self.ensure_assistant_bubble().add_3d_model(message["data"])
+                except Exception as exc:
+                    self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
+        self._refresh_conversation_list()
+        for index in range(self.history_list.count()):
+            item = self.history_list.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) == conversation["id"]:
+                self.history_list.setCurrentItem(item)
+                break
+
+    def _clear_messages(self):
+        self.close_preview()
+        self._markdown_timer.stop()
+        self.current_assistant_bubble = None
+        self.current_response = ""
+        self._response_recorded = False
+        self.current_response_view = None
+        self.current_thinking_panel = None
+        self.current_thinking = ""
+        self._thinking_recorded = False
+        self._rendered_response = None
+        self._rendered_thinking = None
+        self.message_widgets.clear()
+        while self.messages_layout.count() > 1:
+            item = self.messages_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+                item.layout().deleteLater()
+        self.scroll_to_bottom(force=True)
+
+    def new_conversation(self):
+        conversation = self.conversation_store.create()
+        self._activate_conversation(conversation)
+
+    def open_conversation(self, current, _previous=None):
+        if current is None or self.current_conversation is None:
+            return
+        conversation_id = current.data(Qt.ItemDataRole.UserRole)
+        if conversation_id == self.current_conversation["id"]:
+            return
+        conversation = self.conversation_store.get(conversation_id)
+        if conversation is not None:
+            self._activate_conversation(conversation)
 
     def authorize_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Autoriser un dossier pour JARVIS", str(Path.home()))
@@ -474,7 +783,7 @@ class JarvisWindow(QMainWindow):
             QMessageBox.warning(self, "Autorisation impossible", str(exc))
 
     def eventFilter(self, obj, event):
-        if obj is self.input and event.type() == event.Type.KeyPress:
+        if obj is self.input and event.type() == QEvent.Type.KeyPress:
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     return False
@@ -484,9 +793,24 @@ class JarvisWindow(QMainWindow):
 
     def _available_bubble_width(self):
         """Largeur utilisable par les bulles, indépendante de la barre de défilement."""
-        host_width = min(self.width() - 14, self.messages_host.maximumWidth())
+        host_width = min(
+            self.messages_host.maximumWidth(),
+            self.scroll.viewport().width(),
+        )
         margins = self.messages_layout.contentsMargins()
-        return max(260, host_width - margins.left() - margins.right())
+        return max(0, host_width - margins.left() - margins.right())
+
+    def _update_bubble_width(self):
+        available = self._available_bubble_width()
+        for bubble in self.message_widgets:
+            bubble.set_available_width(available)
+
+    def _refresh_content_widths(self):
+        column_width = min(CONTENT_MAX_WIDTH, self.scroll.viewport().width())
+        if self.messages_host.width() != column_width:
+            self.messages_host.setFixedWidth(column_width)
+        self._update_bubble_width()
+        self._sync_bar_margins()
 
     def _sync_bar_margins(self):
         """Aligne le bord droit de la barre d'entrée sur celui des bulles."""
@@ -494,8 +818,8 @@ class JarvisWindow(QMainWindow):
             return
         scroll_bar = self.scroll.verticalScrollBar()
         bar_width = scroll_bar.width() if scroll_bar.isVisible() else 0
-        host_full = (self.width() - 14) <= self.messages_host.maximumWidth()
-        extra = 14 if host_full else bar_width
+        host_full = self.scroll.viewport().width() <= CONTENT_MAX_WIDTH
+        extra = 8 if host_full else bar_width
         margins = self.bottom_layout.contentsMargins()
         wanted = CONTENT_SIDE_MARGIN + extra
         if margins.right() != wanted:
@@ -505,20 +829,17 @@ class JarvisWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        available = self._available_bubble_width()
-        for bubble in self.message_widgets:
-            bubble.set_available_width(available)
-        self._sync_bar_margins()
+        QTimer.singleShot(0, self._refresh_content_widths)
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(0, self._sync_bar_margins)
+        QTimer.singleShot(0, self._refresh_content_widths)
 
     def _on_scroll_range_changed(self, _minimum, maximum):
         if self._autoscroll:
             self.scroll.verticalScrollBar().setValue(maximum)
-        # La barre de défilement peut apparaître/disparaître : réaligne la barre d'entrée.
-        QTimer.singleShot(0, self._sync_bar_margins)
+        # L'apparition de la barre verticale réduit aussi la largeur des bulles.
+        QTimer.singleShot(0, self._refresh_content_widths)
 
     def _on_scroll_value_changed(self, value):
         bar = self.scroll.verticalScrollBar()
@@ -526,6 +847,7 @@ class JarvisWindow(QMainWindow):
 
     def add_message(self, text, role):
         bubble = MarkdownMessage(role)
+        bubble.open_content_requested.connect(self.open_preview)
         self.message_widgets.append(bubble)
         bubble.set_available_width(self._available_bubble_width())
         bubble.set_markdown(text)
@@ -838,20 +1160,29 @@ class JarvisWindow(QMainWindow):
         else:
             visible_prompt = prompt
         self.add_message(visible_prompt, "user")
+        self.current_conversation["messages"].append({
+            "role": "user",
+            "content": visible_prompt,
+        })
+        self._persist_current_conversation()
         self.input.clear()
         self.attachments.clear()
         self.file_row.clear()
         self.file_row.hide()
         self.current_assistant_bubble = None
         self.current_response = ""
+        self._response_recorded = False
         self.current_response_view = None
         self.current_thinking_panel = None
         self.current_thinking = ""
+        self._thinking_recorded = False
         self._rendered_response = None
         self._rendered_thinking = None
         self._markdown_timer.stop()
         self.send_button.setDisabled(True)
         self.attach_button.setDisabled(True)
+        self.history_list.setDisabled(True)
+        self.new_conversation_button.setDisabled(True)
         self.status.setText("●  JARVIS réfléchit…")
         self.status.setStyleSheet("color: #FFB454;")
 
@@ -873,11 +1204,15 @@ class JarvisWindow(QMainWindow):
     def start_response(self):
         # Termine le rendu du tour précédent avant d'ajouter un nouveau bloc.
         self._flush_live_markdown()
+        self._record_current_response()
+        self._record_current_thinking()
         bubble = self.ensure_assistant_bubble()
         self.current_response = ""
+        self._response_recorded = False
         self._rendered_response = None
         self.current_thinking_panel = None
         self.current_thinking = ""
+        self._thinking_recorded = False
         self._rendered_thinking = None
         self.current_response_view = bubble.add_markdown_block("")
         self.scroll_to_bottom()
@@ -902,8 +1237,25 @@ class JarvisWindow(QMainWindow):
                 "Réflexion du modèle", expanded=True, max_height=None
             )
         self.current_thinking += token
+        self._thinking_recorded = False
         if not self._markdown_timer.isActive():
             self._markdown_timer.start()
+
+    def _record_current_response(self):
+        if self.current_response and not self._response_recorded:
+            self.current_conversation["messages"].append({
+                "role": "assistant",
+                "content": self.current_response,
+            })
+            self._response_recorded = True
+
+    def _record_current_thinking(self):
+        if self.current_thinking and not self._thinking_recorded:
+            self.current_conversation["messages"].append({
+                "role": "thinking",
+                "content": self.current_thinking,
+            })
+            self._thinking_recorded = True
 
     def _flush_live_markdown(self):
         """Rend les flux à intervalle régulier plutôt qu'à chaque token."""
@@ -929,13 +1281,20 @@ class JarvisWindow(QMainWindow):
 
     def on_tool_event(self, state, name, details):
         self._flush_live_markdown()
+        self._record_current_response()
+        self._record_current_thinking()
         if name == "plot_chart" and isinstance(details, dict):
             payload = details.get("result", {})
             chart_data = payload.get("chart") if isinstance(payload, dict) else None
             if chart_data and state == "Résultat":
                 self.ensure_assistant_bubble().add_chart(chart_data)
+                self.current_conversation["messages"].append({
+                    "role": "chart",
+                    "data": chart_data,
+                })
                 self.current_thinking_panel = None
                 self.current_thinking = ""
+                self._thinking_recorded = False
                 self.scroll_to_bottom()
                 return
         if name == "create_3d_model" and isinstance(details, dict):
@@ -944,42 +1303,95 @@ class JarvisWindow(QMainWindow):
             if model_data and state == "Résultat":
                 try:
                     self.ensure_assistant_bubble().add_3d_model(model_data)
+                    self.current_conversation["messages"].append({
+                        "role": "model3d",
+                        "data": model_data,
+                    })
                 except Exception as exc:
                     self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
+                    self.current_conversation["messages"].append({
+                        "role": "system",
+                        "title": "Affichage 3D impossible",
+                        "details": str(exc),
+                        "expanded": True,
+                    })
                 self.current_thinking_panel = None
                 self.current_thinking = ""
+                self._thinking_recorded = False
                 self.scroll_to_bottom()
                 return
         title = f"{state} - {name}"
         self.add_system_panel(title, details)
+        self.current_conversation["messages"].append({
+            "role": "system",
+            "title": title,
+            "details": (
+                json.dumps(details, ensure_ascii=False, indent=2)
+                if isinstance(details, (dict, list)) else str(details or "")
+            ),
+        })
         # Un nouvel appel d'outil peut être suivi d'un nouveau cycle de réflexion.
         self.current_thinking_panel = None
         self.current_thinking = ""
+        self._thinking_recorded = False
 
     def on_finished(self):
         self._markdown_timer.stop()
         self._flush_live_markdown()
+        self._record_current_response()
+        self._record_current_thinking()
         self.send_button.setDisabled(False)
         self.attach_button.setDisabled(False)
         self.status.setText("●  Prêt")
         self.status.setStyleSheet("color: #70D9A6;")
+        fallback_response = False
         if self.current_assistant_bubble is None:
             self.add_message("Traitement terminé.", "assistant")
+            fallback_response = True
         elif not self.current_response and not self.current_assistant_bubble.markdown_views:
             self.current_assistant_bubble.add_markdown_block("Traitement terminé.")
+            fallback_response = True
+        if fallback_response:
+            self.current_conversation["messages"].append({
+                "role": "assistant",
+                "content": "Traitement terminé.",
+            })
+        self._persist_current_conversation()
 
     def on_failed(self, error):
         self._markdown_timer.stop()
         self._flush_live_markdown()
+        self._record_current_response()
+        self._record_current_thinking()
         self.add_system_panel("Erreur système - JARVIS", error, expanded=True)
+        self.current_conversation["messages"].append({
+            "role": "system",
+            "title": "Erreur système - JARVIS",
+            "details": error,
+            "expanded": True,
+        })
         self.status.setText("●  Erreur")
         self.status.setStyleSheet("color: #FF6B68;")
         self.send_button.setDisabled(False)
         self.attach_button.setDisabled(False)
+        self._persist_current_conversation()
+
+    def _persist_current_conversation(self):
+        try:
+            self.conversation_store.save(self.current_conversation)
+        except sqlite3.Error as exc:
+            QMessageBox.warning(
+                self, "Historique indisponible",
+                f"La conversation n'a pas pu être sauvegardée : {exc}",
+            )
+            return
+        self._refresh_conversation_list()
 
     def cleanup_worker(self):
         self.worker = None
         self.worker_thread = None
+        self.history_list.setDisabled(False)
+        self.new_conversation_button.setDisabled(False)
 
     def closeEvent(self, event):
         if self.worker_thread and self.worker_thread.isRunning():

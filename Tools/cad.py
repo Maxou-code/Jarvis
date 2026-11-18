@@ -6,6 +6,15 @@ from config import MAX_PYTHON_3D_MODEL_SECONDS, WORKSPACE
 from Core.paths import safe_path
 from Tools.python_runner import run_python
 
+
+def read_cadquery_guide():
+    """Lit uniquement le guide CadQuery fourni avec l'application."""
+    guide_path = Path(__file__).resolve().parent.parent / "Docs" / "cadquery.md"
+    if not guide_path.is_file():
+        raise FileNotFoundError(f"Guide CadQuery introuvable : {guide_path}")
+    return guide_path.read_text(encoding="utf-8")
+
+
 def create_3d_model(title, code, filename="modele_3d"):
     """Exécute un script CadQuery contrôlé et produit un STL dans le workspace.
 

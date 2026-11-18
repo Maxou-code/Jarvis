@@ -4,7 +4,7 @@ import traceback
 from config import MAX_ERROR_DETAILS
 from Tools.apps import get_open_windows, list_installed_apps, open_app
 from Tools.calc import calculate, get_current_datetime
-from Tools.cad import create_3d_model
+from Tools.cad import create_3d_model, read_cadquery_guide
 from Tools.charts import plot_chart
 from Tools.files import (backup_config, create_file, create_folder, list_managed_files,
                          open_file, open_workspace, read_file, read_managed_file,
@@ -34,6 +34,7 @@ FUNCTIONS = {
     "knowledge_list": knowledge_list,
     "plot_chart": plot_chart,
     "create_3d_model": create_3d_model,
+    "read_cadquery_guide": read_cadquery_guide,
     "create_file": create_file,
     "create_folder": create_folder,
     "write_file": write_file,

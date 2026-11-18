@@ -1,9 +1,11 @@
 import html
 import html as html_lib
 import json
+import re
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QUrl, QUrlQuery, pyqtSignal
 from PyQt6.QtGui import QColor
+from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 # Rendu Markdown fidèle (CommonMark, retours à la ligne, tableaux, code).
@@ -19,7 +21,6 @@ try:
         style="dracula",
         nowrap=True
     )
-
 
     def highlight_code(code, language, attrs):
         if not language:
@@ -54,8 +55,19 @@ def render_code_block(tokens, idx, options, env):
     token = tokens[idx]
 
     # Récupération du langage
-    info = token.info.strip().split()
-    language = info[0] if info else "text"
+    info = token.info.strip()
+    language, _, name = info.partition(" ")
+    language = language or "text"
+    name = name.strip()
+    named_program = re.search(
+        r"(?:title|filename)\s*=\s*(['\"])(.*?)\1",
+        name,
+        flags=re.IGNORECASE,
+    )
+    if named_program:
+        name = named_program.group(2)
+    elif name.lower().startswith(("title=", "filename=")):
+        name = name.split("=", 1)[1].strip("'\"")
 
     # Coloration syntaxique
     highlighted = highlight_code(
@@ -69,15 +81,24 @@ def render_code_block(tokens, idx, options, env):
         highlighted = html.escape(token.content)
 
     return f"""
-    <div class="code-block">
+    <div class="code-block"
+         data-language="{html.escape(language, quote=True)}"
+         data-name="{html.escape(name, quote=True)}">
         <div class="code-toolbar">
             <span class="code-language">{html.escape(language.upper())}</span>
 
-            <button class="copy-code"
-                    onclick="copyCode(this)"
-                    type="button">
-                Copier
-            </button>
+            <div display="flex">
+                <button class="open-code"
+                        onclick="openCode(this)"
+                        type="button">
+                    Ouvrir en grand
+                </button>
+                <button class="copy-code"
+                        onclick="copyCode(this)"
+                        type="button">
+                    Copier
+                </button>
+            </div>
         </div>
 
         <pre><code>{highlighted}</code></pre>
@@ -168,6 +189,7 @@ MARKDOWN_CSS = """
         font-size: 11px; font-weight: 700; letter-spacing: 1px;
     }
     .copy-code {
+        margin-left: 3px;
         border: 1px solid #176078;
         background: transparent;
         border-radius: 3px;
@@ -178,13 +200,31 @@ MARKDOWN_CSS = """
         cursor: pointer;
         transition: background .18s ease, color .18s ease, border-color .18s ease;
     }
+    .open-code {
+        border: 1px solid #176078;
+        background: transparent;
+        border-radius: 3px;
+        padding: 4px 8px;
+        color: #9CCBD5;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .open-code:hover { background: #145064; color: #FFFFFF; }
     .copy-code:hover { background: #145064; color: #FFFFFF; }
     .copy-code.copied {
         background: #183D2B;
         border-color: #2E9D62;
         color: #8BE0AD;
     }
-    .code-block pre { margin: 0; border: none; border-radius: 0; }
+    .code-block pre {
+        margin: 0;
+        border: none;
+        border-radius: 0;
+        white-space: pre;
+        overflow-wrap: normal;
+        overflow-x: auto;
+    }
     ul, ol { margin: 5px 0 8px; padding-left: 23px; }
     li { margin: 2px 0; }
     hr { border: 0; border-top: 1px solid #145064; margin: 10px 0; }
@@ -194,6 +234,11 @@ MARKDOWN_CSS = """
     img { max-width: 100%; }
 </style>
 """
+if _PYGMENTS_FORMATTER is not None:
+    MARKDOWN_CSS = MARKDOWN_CSS.replace(
+        "</style>",
+        _PYGMENTS_FORMATTER.get_style_defs("pre code") + "\n</style>",
+    )
 COPY_JS_FUNCTION = """
 <script>
 function copyCode(button) {
@@ -245,8 +290,32 @@ function copyCode(button) {
         button.classList.remove("copied");
     }
 }
+
+function openCode(button) {
+    const block = button.closest(".code-block");
+    const codeElement = block.querySelector("pre code");
+
+    if (codeElement) {
+        window.location.href = "jarvis://open-code?code="
+            + encodeURIComponent(codeElement.innerText)
+            + "&language=" + encodeURIComponent(block.dataset.language)
+            + "&name=" + encodeURIComponent(block.dataset.name);
+    }
+}
 </script>
 """
+
+
+class MarkdownPage(QWebEnginePage):
+    custom_url_requested = pyqtSignal(QUrl)
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        if url.scheme() == "jarvis" and url.host() == "open-code":
+            self.custom_url_requested.emit(url)
+            return False
+        return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+
+
 def markdown_to_html_full(markdown):
     """Construit une page HTML autonome destinée à QWebEngineView."""
     text = (markdown or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -272,9 +341,13 @@ class MarkdownWebView(QWebEngineView):
     """Vue Markdown persistante : le document Chromium n'est chargé qu'une fois."""
 
     content_size_changed = pyqtSignal(int, int)  # largeur naturelle, hauteur
+    open_content_requested = pyqtSignal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        page = MarkdownPage(self)
+        page.custom_url_requested.connect(self._on_custom_url_requested)
+        self.setPage(page)
         self._html_generation = 0
         self._last_size = (0, 0)
         self._page_initialized = False
@@ -292,6 +365,23 @@ class MarkdownWebView(QWebEngineView):
         self.page().setBackgroundColor(QColor(0, 0, 0, 0))
         self.loadFinished.connect(self._on_page_loaded)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+
+    def _on_custom_url_requested(self, url):
+        query = QUrlQuery(url)
+        code = query.queryItemValue(
+            "code", QUrl.ComponentFormattingOption.FullyDecoded
+        )
+        language = query.queryItemValue(
+            "language", QUrl.ComponentFormattingOption.FullyDecoded
+        )
+        name = query.queryItemValue(
+            "name", QUrl.ComponentFormattingOption.FullyDecoded
+        )
+        self.open_content_requested.emit("programme", {
+            "code": code,
+            "language": language,
+            "name": name,
+        })
 
     def _measure_height(self):
         """Alias conservé pour les anciens appels : mesure largeur + hauteur."""

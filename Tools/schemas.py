@@ -47,6 +47,7 @@ tools = [
         ["query"]
     ),
     make_tool("list_python_packages", "Liste les bibliothèques Python installées et les modules importables dans l’environnement de JARVIS. À utiliser avant de choisir une bibliothèque.", {}, []),
+    make_tool("read_cadquery_guide", "Lit le guide CadQuery fourni avec Jarvis (Docs/cadquery.md). À consulter pour les opérations, sélecteurs et contraintes des scripts 3D.", {}, []),
     make_tool("run_python", "Exécute du Python dans un processus séparé. Tous les modules standard et packages installés dans l’environnement Python de JARVIS sont importables. Écritures limitées au workspace ; réseau, processus externes et suppressions bloqués ; 30 s maximum. Ce n’est pas une sandbox inviolable.", {"code":string_prop("Code Python complet."),"timeout":{"type":"integer","description":"Délai de 1 à 30 secondes."}},["code"]),
     make_tool("list_managed_files", "Liste workspace/, documents/, downloads/, desktop/ ou un shared_N autorisé.", {"location":string_prop("Dossier, par exemple documents/ ou workspace/")},["location"]),
     make_tool("read_managed_file", "Lit un fichier d'un dossier autorisé.", {"location":string_prop("Chemin alias/relatif.")},["location"]),
@@ -60,9 +61,13 @@ tools = [
     make_tool(
         "create_3d_model",
         "Crée une pièce mécanique 3D avec CadQuery et l'affiche dans la conversation. "
-        "Fournis un script Python qui importe/emploie `cq` (déjà importé) et définit `model` "
-        "comme un cq.Workplane ou cq.Shape. Utilise des dimensions en millimètres. "
-        "Le programme exporte automatiquement le résultat en STL ; ne crée pas toi-même le fichier STL.",
+        "`cq` est déjà importé ; toutes les dimensions sont en mm. Repères rapides : "
+        "`cq.Workplane('XY').box(x, y, z)`, `.rect(x, y).extrude(h)`, "
+        "`.circle(r).extrude(h)`, `.faces('>Z').workplane().hole(d)`, "
+        "`.edges('|Z').fillet(r)` ou `.chamfer(d)`, `.union(other)` et `.cut(other)`. "
+        "Exemple : `model = cq.Workplane('XY').box(40, 30, 8).faces('>Z').workplane().hole(5)`. "
+        "Fournis un script autonome qui définit `model` comme un cq.Workplane ou cq.Shape. "
+        "Jarvis exporte automatiquement en STL ; ne crée pas toi-même le fichier STL.",
         {
             "title": string_prop("Nom descriptif du modèle."),
             "filename": string_prop("Nom de fichier simple, sans extension ni chemin."),

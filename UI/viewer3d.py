@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
                              QPushButton, QSizePolicy, QVBoxLayout, QWidget)
@@ -26,9 +26,9 @@ class OffscreenSTLView(QLabel):
 
         self.pl.set_background("#050B12")
 
-        self.pl.add_mesh(
+        self._mesh_actor = self.pl.add_mesh(
             mesh,
-            color="#07121B",
+            color="#103746",
             show_edges=True,
             edge_color="#087C9A",
             line_width=2.2,
@@ -39,6 +39,7 @@ class OffscreenSTLView(QLabel):
             lighting=True
         )
 
+        self._edges_visible = True
         self.pl.view_isometric()
         self.pl.reset_camera()
 
@@ -149,6 +150,14 @@ class OffscreenSTLView(QLabel):
         self.pl.render()
         self.refresh()
 
+    def set_edges_visible(self, visible):
+        if self._closed:
+            return
+        self._edges_visible = bool(visible)
+        self._mesh_actor.GetProperty().SetEdgeVisibility(self._edges_visible)
+        self.pl.render()
+        self.refresh()
+
     # --------------------------------------------------
     # ROTATION
     # --------------------------------------------------
@@ -238,7 +247,9 @@ class OffscreenSTLView(QLabel):
 class Inline3DViewer(QFrame):
     """Visualiseur STL avec rendu VTK hors écran."""
 
-    def __init__(self, model_data, parent=None):
+    open_requested = pyqtSignal(object)
+
+    def __init__(self, model_data, parent=None, show_open_button=True):
         super().__init__(parent)
 
         self.model_data = dict(model_data or {})
@@ -314,9 +325,23 @@ class Inline3DViewer(QFrame):
         )
         top.addWidget(self.status_label)
 
+        if show_open_button:
+            open_button = QPushButton("Ouvrir en grand")
+            open_button.clicked.connect(
+                lambda: self.open_requested.emit(self.model_data)
+            )
+            top.addWidget(open_button)
+
         reset_button = QPushButton("Réinitialiser la vue")
         reset_button.clicked.connect(self.reset_camera)
         top.addWidget(reset_button)
+
+        self.edge_button = QPushButton("Afficher/Masquer Arrêtes")
+        self.edge_button.setCheckable(True)
+        self.edge_button.setChecked(True)
+        self.edge_button.setToolTip("Afficher ou masquer les arêtes du maillage")
+        self.edge_button.toggled.connect(self.set_edges_visible)
+        top.addWidget(self.edge_button)
 
         export_button = QPushButton("↓  STL")
         export_button.setObjectName("stlButton")
@@ -371,6 +396,7 @@ class Inline3DViewer(QFrame):
             self.status_label.setText("STL • Rendu actif")
 
         except Exception as exc:
+            self.edge_button.setDisabled(True)
 
             if self.view is not None:
                 self.view.close_renderer()
@@ -396,6 +422,13 @@ class Inline3DViewer(QFrame):
         if self.view is not None:
             try:
                 self.view.reset_view()
+            except Exception as exc:
+                self.status_label.setToolTip(str(exc))
+
+    def set_edges_visible(self, visible):
+        if self.view is not None:
+            try:
+                self.view.set_edges_visible(visible)
             except Exception as exc:
                 self.status_label.setToolTip(str(exc))
 
@@ -432,7 +465,10 @@ class Inline3DViewer(QFrame):
             )
 
     def closeEvent(self, event):
+        self.close_renderer()
+        super().closeEvent(event)
+
+    def close_renderer(self):
         if self.view is not None:
             self.view.close_renderer()
-
-        super().closeEvent(event)
+            self.view = None

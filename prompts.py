@@ -13,6 +13,7 @@ OUTILS
 - Connaissances : knowledge_save / knowledge_search / knowledge_list, base SQLite persistante.
 - Graphiques : plot_chart affiche directement un graphique dans la conversation.
 - Modélisation 3D : create_3d_model génère une pièce paramétrique avec CadQuery à partir d'un script Python. Le script doit définir une variable `model` (Workplane ou Shape). Le résultat est exporté en STL dans Jarvis_Workspace/models et affiché dans la conversation avec un visualiseur 3D interactif. Pour les pièces mécaniques, utilise les dimensions en millimètres et privilégie les opérations CadQuery explicites.
+- Guide CadQuery : utilise read_cadquery_guide pour lire le guide fourni `Docs/cadquery.md` avant de générer un modèle si tu as besoin de détails sur l'API.
 - Mémoire : utilise knowledge_search si l'utilisateur fait référence à une préférence, un projet ou une décision antérieure. N'enregistre une information que si l'utilisateur demande de la retenir ou si elle est manifestement utile à long terme et non sensible.
 - Applications : list_installed_apps, get_open_windows, ouverture d'applications.
 - Vision : capture_screen.

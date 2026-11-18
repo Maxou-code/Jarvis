@@ -1,12 +1,45 @@
 import json
 
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                              QToolButton, QVBoxLayout, QWidget)
 
 from UI.chart_view import InlineChart
 from UI.markdown_view import MarkdownWebView, render_markdown
 from UI.viewer3d import Inline3DViewer
+
+
+class ChartPreview(QFrame):
+    open_requested = pyqtSignal(object)
+
+    def __init__(self, data, parent=None):
+        super().__init__(parent)
+        self.data = dict(data or {})
+        self.setStyleSheet(
+            "QFrame { background:#050B12; border:1px solid #174052; border-radius:6px; } "
+            "QLabel { color:#D9F8FF; border:none; font-weight:700; } "
+            "QPushButton { background:#102B38; color:#C8F5FF; border:1px solid #216078; "
+            "border-radius:4px; padding:5px 10px; } "
+            "QPushButton:hover { background:#17485B; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 8)
+        layout.setSpacing(5)
+
+        toolbar = QHBoxLayout()
+        title = QLabel(str(self.data.get("title", "Graphique"))[:120])
+        toolbar.addWidget(title, 1)
+        open_button = QPushButton("Ouvrir en grand")
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_button.clicked.connect(
+            lambda: self.open_requested.emit(self.data)
+        )
+        toolbar.addWidget(open_button)
+        layout.addLayout(toolbar)
+
+        self.chart = InlineChart(self.data, self)
+        layout.addWidget(self.chart)
+
 
 class CollapsiblePanel(QFrame):
     def __init__(self, title, content="", expanded=False, max_height=320):
@@ -70,8 +103,12 @@ class CollapsiblePanel(QFrame):
     def append(self, text):
         self.current_markdown += str(text)
         self.set_markdown(self.current_markdown)
+
+
 class MarkdownMessage(QFrame):
     """Bulle de message dont les vues HTML sont dimensionnées par WebEngine."""
+
+    open_content_requested = pyqtSignal(str, object)
 
     def __init__(self, role):
         super().__init__()
@@ -102,6 +139,7 @@ class MarkdownMessage(QFrame):
 
     def _create_markdown_view(self):
         view = MarkdownWebView(self)
+        view.open_content_requested.connect(self.open_content_requested)
         view.setFixedHeight(44)
         view.content_size_changed.connect(
             lambda width, height, v=view: self._on_view_size(v, width, height)
@@ -140,17 +178,27 @@ class MarkdownMessage(QFrame):
         return panel
 
     def add_chart(self,data):
-        widget=InlineChart(data); self.layout.addWidget(widget); self.extra_widgets.append(widget); self._fit(); return widget
+        widget = ChartPreview(data, self)
+        widget.open_requested.connect(
+            lambda chart_data: self.open_content_requested.emit("graphique", chart_data)
+        )
+        self.layout.addWidget(widget)
+        self.extra_widgets.append(widget)
+        self._fit()
+        return widget
 
     def add_3d_model(self, model_data):
         widget = Inline3DViewer(model_data, self)
+        widget.open_requested.connect(
+            lambda data: self.open_content_requested.emit("modèle 3D", data)
+        )
         self.layout.addWidget(widget)
         self.extra_widgets.append(widget)
         self._fit()
         return widget
 
     def set_available_width(self, width):
-        self.available_width = max(260, int(width))
+        self.available_width = max(0, int(width))
         self._fit()
 
     def _fit(self):
@@ -159,20 +207,20 @@ class MarkdownMessage(QFrame):
         self._fitting = True
         try:
             max_width = max(
-                300,
+                0,
                 int(self.available_width * (0.72 if self.role == "user" else 1.0))
             )
             natural_widths = [size[0] for size in self._view_sizes.values()]
             ideal_width = max(natural_widths, default=260)
 
             # Les blocs techniques occupent davantage d'espace ; les textes courts restent compacts.
-            width = min(max(ideal_width + 48, 300), max_width)
+            width = min(max(ideal_width + 48, min(300, max_width)), max_width)
             if self.panels:
                 width = max(width, min(560, max_width))
             if self.role != "user":
                 width = max_width  # la bulle du modèle occupe toujours toute la largeur
             self.setFixedWidth(width)
-            content_width = max(220, width - 34)
+            content_width = max(0, width - 34)
 
             for view in self.markdown_views:
                 if view.width() != content_width:
@@ -181,7 +229,7 @@ class MarkdownMessage(QFrame):
             for panel in self.panels:
                 panel.setFixedWidth(content_width)
 
-                body_width = max(180, content_width - 16)
+                body_width = max(0, content_width - 16)
                 panel.body.setFixedWidth(body_width)
 
                 QTimer.singleShot(0, panel.body._measure_height)
@@ -192,6 +240,8 @@ class MarkdownMessage(QFrame):
             self.updateGeometry()
         finally:
             self._fitting = False
+
+
 def tool_details_to_markdown(details):
     """Présente les structures d'outils lisiblement, sans perdre le Markdown texte."""
     if isinstance(details, (dict, list)):

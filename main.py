@@ -23,7 +23,7 @@ def main():
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     window = JarvisWindow()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 

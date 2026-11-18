@@ -14,6 +14,24 @@ from Tools.screen import capture_screen
 messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 _system_ready = False
 
+
+def set_conversation_history(history):
+    """Remplace le contexte actif par les échanges sauvegardés."""
+    global messages
+    system_message = messages[0] if messages else {
+        "role": "system",
+        "content": SYSTEM_PROMPT,
+    }
+    restored = [
+        {"role": message["role"], "content": message["content"]}
+        for message in history
+        if message.get("role") in {"user", "assistant"}
+        and isinstance(message.get("content"), str)
+    ]
+    messages = [system_message] + restored
+    trim_history()
+
+
 def load_modelfile_system():
     """
     Récupère le SYSTEM du Modelfile via /api/show.
