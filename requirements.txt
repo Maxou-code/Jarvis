@@ -17,3 +17,5 @@ pyperclip
 pypdf
 python-docx
 openpyxl
+
+pyqt6-sip

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout,
     QWidget,
 )
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 from pygments import lex
 from pygments.lexers import TextLexer, get_lexer_by_name
 from pygments.styles import get_style_by_name
@@ -152,6 +153,18 @@ class CodeEditor(QPlainTextEdit):
             block_number += 1
 
 
+class RoundedWebView(QWebEngineView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.page().setBackgroundColor(QColor("#07121B"))
+        self.loadFinished.connect(self._apply_rounded_corners)
+
+    def _apply_rounded_corners(self, _success):
+        self.page().runJavaScript(
+            "document.documentElement.style.clipPath = 'inset(0 round 4px)';"
+        )
+
+
 class PreviewPanel(QFrame):
     close_requested = pyqtSignal()
 
@@ -171,22 +184,46 @@ class PreviewPanel(QFrame):
                 letter-spacing:1px;
             }
             QPushButton {
-                background:#0A202B;
-                color:#8DEEFF;
-                border:1px solid #145064;
+                background:#102B38;
+                color:#C8F5FF;
+                border:1px solid #216078;
                 border-radius:4px;
-                padding:5px 9px;
+                padding:6px 12px;
+                font-weight:600;
             }
-            QPushButton:hover { background:#103746; border-color:#20A9C8; }
+
+            QPushButton:hover {
+                background:#17485B;
+            }
+            
             QPushButton#saveButton {
                 background:#123D32;
                 border-color:#27865F;
                 color:#A5F0C7;
             }
-
             QPushButton#saveButton:hover {
                 background:#195641;
             }
+                        
+            QPushButton#visualizeButton {
+                background:#102B38;
+                color:#C8F5FF;
+                border:1px solid #216078;
+                border-radius:4px;
+                padding:6px 12px;
+                font-weight:600;
+            }
+
+            QPushButton#visualizeButton:hover {
+                background:#17485B;
+            }
+
+            QPushButton#visualizeButton:checked {
+                background:#00AFCF;
+                border-color:#7CEEFF;
+                color:#102B38;
+            }            
+            
             QPlainTextEdit {
                 background:#050D14;
                 color:#D7F8FF;
@@ -221,6 +258,8 @@ class PreviewPanel(QFrame):
         layout.addWidget(self.content_stack, 1)
         self._active_kind = None
         self._active_data = None
+        self._html_editor = None
+        self._html_view = None
 
         self.copy_button = QPushButton()
         self.copy_button.setIcon(QIcon("Icons/copy-solid-full.svg"))
@@ -246,6 +285,16 @@ class PreviewPanel(QFrame):
         self._copy_feedback_timer.setSingleShot(True)
         self._copy_feedback_timer.timeout.connect(self._reset_copy_feedback)
 
+        self.visualize_button = QPushButton()
+        self.visualize_button.setIcon(QIcon("Icons/eye-solid-full.svg"))
+        self.visualize_button.setToolTip("Visualiser")
+        self.visualize_button.setObjectName("visualizeButton")
+        self.visualize_button.setCheckable(True)
+        self.visualize_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.visualize_button.toggled.connect(self._toggle_html_preview)
+        self.visualize_button.hide()
+        toolbar.insertWidget(2, self.visualize_button)
+
         self.save_button = QPushButton()
         self.save_button.setIcon(QIcon("Icons/download-solid-full.svg"))
         self.save_button.setToolTip("Enregistrer")
@@ -253,7 +302,8 @@ class PreviewPanel(QFrame):
         self.save_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_button.clicked.connect(self._save_active_content)
         self.save_button.hide()
-        toolbar.insertWidget(2, self.save_button)
+        toolbar.insertWidget(3, self.save_button)
+
 
     def show_content(self, kind, data):
         self._clear_content()
@@ -266,6 +316,17 @@ class PreviewPanel(QFrame):
             language = str(code_data.get("language", "text"))
             name = str(code_data.get("name", "")).strip()
             content = CodeEditor(code, language, self.content_stack)
+            normalized_language = language.strip().lower()
+            is_html = (
+                normalized_language in {"html", "htm", "xhtml"}
+                or Path(name).suffix.lower() in {".html", ".htm"}
+            )
+            if is_html:
+                self._html_editor = content
+                self._html_view = RoundedWebView(self.content_stack)
+                self._html_view.setHtml(code)
+                self.content_stack.addWidget(self._html_view)
+                self.visualize_button.show()
             self.title.setText(name or language.upper() or "TEXTE")
             self.save_button.setVisible(True)
             self.copy_button.setVisible(True)
@@ -298,6 +359,16 @@ class PreviewPanel(QFrame):
 
         self.content_stack.addWidget(content)
         self.content_stack.setCurrentWidget(content)
+
+    def _toggle_html_preview(self, checked):
+        if self._html_editor is None or self._html_view is None:
+            return
+
+        target = self._html_view if checked else self._html_editor
+        self.content_stack.setCurrentWidget(target)
+        self.visualize_button.setToolTip(
+            "Afficher le code" if checked else "Visualiser"
+        )
 
     def _save_active_content(self):
         if self._active_kind == "programme":
@@ -434,8 +505,13 @@ class PreviewPanel(QFrame):
             content.deleteLater()
         self._active_kind = None
         self._active_data = None
+        self._html_editor = None
+        self._html_view = None
+        self.visualize_button.setChecked(False)
+        self.visualize_button.setToolTip("Visualiser")
         self.save_button.hide()
         self.copy_button.hide()
+        self.visualize_button.hide()
 
     def clear_content(self):
         self._clear_content()

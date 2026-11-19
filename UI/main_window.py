@@ -1,8 +1,4 @@
 import ctypes
-import sys
-import ast
-import math
-from datetime import datetime
 
 # IMPORTANT : régler le DPI avant d'importer PyAutoGUI.
 try:
@@ -19,39 +15,20 @@ except Exception:
             pass
 
 import base64
-import io
 import json
-import os
-import re
 import sqlite3
-import subprocess
-import ctypes
-import time
-import traceback
-import html as html_lib
-from ctypes import wintypes
 from pathlib import Path
 
 # Interface graphique
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QUrl, QSize, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QDesktopServices, QIcon, QSurfaceFormat, QImage, QShortcut, QKeySequence
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QSize, QEvent
+from PyQt6.QtGui import QFontMetrics, QPixmap, QDesktopServices, QIcon, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
-    QSizePolicy, QFileDialog, QToolButton, QListWidget, QListWidgetItem,
+    QSizePolicy, QFileDialog, QListWidget, QListWidgetItem,
     QMessageBox, QDialog, QDialogButtonBox, QGridLayout, QInputDialog, QMenu,
     QSplitter
 )
-
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-
-from winotify import Notification, audio
-
-import pyautogui
-import requests
-import mss
-
-from PIL import Image
 
 # Rendu Markdown fidèle (CommonMark, retours à la ligne, tableaux, code).
 # Installation : pip install markdown-it-py
@@ -97,8 +74,6 @@ except ImportError:
     _MD = None
     _PYGMENTS_FORMATTER = None
 
-import html
-
 from config import (
     CONTENT_MAX_WIDTH,
     CONTENT_SIDE_MARGIN,
@@ -110,10 +85,8 @@ from config import (
 from Core.agent import set_conversation_history
 from Core.conversations import ConversationStore
 from Core.paths import register_authorized_directory
-from UI.chart_view import InlineChart
 from UI.markdown_view import MarkdownWebView, render_markdown
 from UI.preview_panel import PreviewPanel
-from UI.viewer3d import Inline3DViewer
 from UI.widgets import MarkdownMessage, tool_details_to_markdown
 from UI.worker import AgentWorker
 
@@ -336,20 +309,7 @@ class JarvisWindow(QMainWindow):
             QListWidget::item:selected { background: #103746; }
 
             QScrollArea { background: transparent; border: none; }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 5px 2px;
-            }
-            QScrollBar::handle:vertical {
-                background: #145064;
-                border-radius: 3px;
-                min-height: 35px;
-            }
-            QScrollBar::handle:vertical:hover { background: #20A9C8; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
+
             QToolTip {
                 background: #071720;
                 color: #D7F8FF;

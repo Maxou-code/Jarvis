@@ -137,6 +137,24 @@ def prepare_markdown_for_qt(markdown):
     return "\n".join(result)
 MARKDOWN_CSS = """
 <style>
+    ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #555;
+        border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #777;
+    }
+    ::-webkit-scrollbar-button {
+        display: none;
+    }
+
     html, body {
         background: transparent;
         color: #D7F8FF;
