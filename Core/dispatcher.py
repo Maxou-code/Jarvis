@@ -93,6 +93,9 @@ def execute_tool(name, args):
                 "Analyse cette erreur. Identifie sa cause, "
                 "corrige les arguments ou choisis une autre méthode, "
                 "puis réessaie si cela est raisonnable."
+                if name != "create_3d_model" else
+                "Analyse cette erreur, puis consulte obligatoirement "
+                "read_cadquery_guide avant de corriger le script ou de réessayer."
             )
         }, ensure_ascii=False)
 def normalize_tool_arguments(arguments):

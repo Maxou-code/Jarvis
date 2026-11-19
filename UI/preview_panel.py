@@ -1,16 +1,15 @@
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QRect, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import (
-    QColor, QFont, QImage, QPainter, QSyntaxHighlighter, QTextCharFormat,
+    QColor, QFont, QImage, QPainter, QSyntaxHighlighter, QTextCharFormat, QIcon,
 )
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
     QPlainTextEdit, QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import QTimer
 from pygments import lex
 from pygments.lexers import TextLexer, get_lexer_by_name
 from pygments.styles import get_style_by_name
@@ -179,6 +178,15 @@ class PreviewPanel(QFrame):
                 padding:5px 9px;
             }
             QPushButton:hover { background:#103746; border-color:#20A9C8; }
+            QPushButton#saveButton {
+                background:#123D32;
+                border-color:#27865F;
+                color:#A5F0C7;
+            }
+
+            QPushButton#saveButton:hover {
+                background:#195641;
+            }
             QPlainTextEdit {
                 background:#050D14;
                 color:#D7F8FF;
@@ -199,7 +207,10 @@ class PreviewPanel(QFrame):
         self.title = QLabel("APERÇU")
         self.title.setObjectName("previewTitle")
         toolbar.addWidget(self.title, 1)
-        close_button = QPushButton("×")
+
+        close_button = QPushButton()
+        close_button.setIcon(QIcon("Icons/xmark-solid-full.svg"))
+        close_button.setFixedSize(25, 25)
         close_button.setToolTip("Fermer le volet")
         close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         close_button.clicked.connect(lambda: self.close_requested.emit())
@@ -211,17 +222,38 @@ class PreviewPanel(QFrame):
         self._active_kind = None
         self._active_data = None
 
-        self.save_button = QPushButton("Enregistrer")
-        self.save_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.save_button.clicked.connect(self._save_active_content)
-        self.save_button.hide()
-        toolbar.insertWidget(1, self.save_button)
-
-        self.copy_button = QPushButton("Copier")
+        self.copy_button = QPushButton()
+        self.copy_button.setIcon(QIcon("Icons/copy-solid-full.svg"))
+        self.copy_button.setToolTip("Copier")
+        self.copy_button.setObjectName("copyButton")
         self.copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_button.clicked.connect(self._copy_code)
         self.copy_button.hide()
-        toolbar.insertWidget(2, self.copy_button)
+        toolbar.insertWidget(1, self.copy_button)
+
+        self._copy_feedback_progress = 0.0
+        self._copy_feedback_target = 0.0
+        self._copy_feedback_animation = QVariantAnimation(self)
+        self._copy_feedback_animation.setDuration(180)
+        self._copy_feedback_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._copy_feedback_animation.valueChanged.connect(
+            self._update_copy_feedback
+        )
+        self._copy_feedback_animation.finished.connect(
+            self._finish_copy_feedback
+        )
+        self._copy_feedback_timer = QTimer(self)
+        self._copy_feedback_timer.setSingleShot(True)
+        self._copy_feedback_timer.timeout.connect(self._reset_copy_feedback)
+
+        self.save_button = QPushButton()
+        self.save_button.setIcon(QIcon("Icons/download-solid-full.svg"))
+        self.save_button.setToolTip("Enregistrer")
+        self.save_button.setObjectName("saveButton")
+        self.save_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_button.clicked.connect(self._save_active_content)
+        self.save_button.hide()
+        toolbar.insertWidget(2, self.save_button)
 
     def show_content(self, kind, data):
         self._clear_content()
@@ -273,6 +305,11 @@ class PreviewPanel(QFrame):
         elif self._active_kind == "graphique":
             self._save_chart()
 
+    def save_chart(self, data):
+        self._active_kind = "graphique"
+        self._active_data = data
+        self._save_chart()
+
     def _save_code(self):
         data = self._active_data if isinstance(self._active_data, dict) else {}
         language = str(data.get("language", "text")).lower()
@@ -310,8 +347,48 @@ class PreviewPanel(QFrame):
     def _copy_code(self):
         data = self._active_data if isinstance(self._active_data, dict) else {}
         QApplication.clipboard().setText(str(data.get("code", "")))
-        self.copy_button.setText("Copié !")
-        QTimer.singleShot(1500, lambda: self.copy_button.setText("Copier"))
+        self.copy_button.setIcon(QIcon("Icons/copy-regular-full.svg"))
+        self._animate_copy_feedback(1.0)
+        self._copy_feedback_timer.start(1500)
+
+    def _animate_copy_feedback(self, target):
+        self._copy_feedback_animation.stop()
+        self._copy_feedback_target = target
+        self._copy_feedback_animation.setStartValue(self._copy_feedback_progress)
+        self._copy_feedback_animation.setEndValue(target)
+        self._copy_feedback_animation.start()
+
+    def _update_copy_feedback(self, value):
+        self._copy_feedback_progress = float(value)
+        base_background = QColor("#0A202B")
+        copied_background = QColor("#183D2B")
+        base_border = QColor("#145064")
+        copied_border = QColor("#2E9D62")
+
+        def blend(start, end):
+            progress = self._copy_feedback_progress
+            return QColor(
+                round(start.red() + (end.red() - start.red()) * progress),
+                round(start.green() + (end.green() - start.green()) * progress),
+                round(start.blue() + (end.blue() - start.blue()) * progress),
+            )
+
+        background = blend(base_background, copied_background)
+        border = blend(base_border, copied_border)
+        self.copy_button.setStyleSheet(
+            "QPushButton#copyButton {"
+            f"background-color: {background.name()};"
+            f"border-color: {border.name()};"
+            "}"
+        )
+
+    def _finish_copy_feedback(self):
+        if self._copy_feedback_target == 0.0:
+            self.copy_button.setStyleSheet("")
+
+    def _reset_copy_feedback(self):
+        self.copy_button.setIcon(QIcon("Icons/copy-solid-full.svg"))
+        self._animate_copy_feedback(0.0)
 
     def _save_chart(self):
         data = self._active_data if isinstance(self._active_data, dict) else {}

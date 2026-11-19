@@ -274,6 +274,30 @@ class JarvisWindow(QMainWindow):
                 border-color: #164456;
             }
 
+            QPushButton#reflectionToggle {
+                background: #102B38;
+                color: #55717D;
+                border: 1px solid #145064;
+                border-radius: 4px;
+                min-width: 42px;
+                min-height: 42px;
+                font-size: 21px;
+                font-weight: 800;
+            }
+            QPushButton#reflectionToggle:hover {
+                background: #103746;
+                border-color: #20A9C8;
+            }
+            QPushButton#reflectionToggle:checked {
+                background: #00AFCF;
+                color: #031018;
+                border-color: #7CEEFF;
+            }
+            QPushButton#reflectionToggle:checked:hover {
+                background: #38DDFB;
+                border-color: #C0FAFF;
+            }
+
             QPushButton#attach, QPushButton#clear {
                 background: #0A202B;
                 color: #8DEEFF;
@@ -406,7 +430,8 @@ class JarvisWindow(QMainWindow):
         history_heading = QLabel("CONVERSATIONS")
         history_heading.setObjectName("historyTitle")
         history_layout.addWidget(history_heading)
-        self.new_conversation_button = QPushButton("+ Nouvelle conversation")
+        self.new_conversation_button = QPushButton("Nouvelle conversation")
+        self.new_conversation_button.setIcon(QIcon("Icons/plus-solid-full.svg"))
         self.new_conversation_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.new_conversation_button.setStyleSheet(
             "QPushButton { background:#0A202B; color:#8DEEFF; border:1px solid #145064; "
@@ -529,6 +554,22 @@ class JarvisWindow(QMainWindow):
         self.input.installEventFilter(self)
         composer_layout.addWidget(self.input, 1)
 
+        self.reflection_button = QPushButton()
+        self.reflection_button.setIcon(QIcon("Icons/brain-solid-full.svg"))
+        self.reflection_button.setIconSize(QSize(22, 22))
+        self.reflection_button.setObjectName("reflectionToggle")
+        self.reflection_button.setCheckable(True)
+        self.reflection_button.setChecked(True)
+        self.reflection_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reflection_button.setToolTip("Désactiver la réflexion du modèle")
+        self.reflection_button.toggled.connect(
+            lambda enabled: self.reflection_button.setToolTip(
+                "Désactiver la réflexion du modèle"
+                if enabled else "Activer la réflexion du modèle"
+            )
+        )
+        composer_layout.addWidget(self.reflection_button)
+
         self.send_button = QPushButton()
         self.send_button.setIcon(QIcon("Icons/paper-plane-regular-full.svg"))
         self.send_button.setIconSize(QSize(22, 22))
@@ -605,6 +646,10 @@ class JarvisWindow(QMainWindow):
                 [max(300, total_width - panel_width), panel_width]
             )
         QTimer.singleShot(0, self._refresh_content_widths)
+
+    def save_inline_content(self, kind, data):
+        if kind == "graphique":
+            self.preview_panel.save_chart(data)
 
     def close_preview(self):
         self.preview_panel.clear_content()
@@ -848,6 +893,7 @@ class JarvisWindow(QMainWindow):
     def add_message(self, text, role):
         bubble = MarkdownMessage(role)
         bubble.open_content_requested.connect(self.open_preview)
+        bubble.save_content_requested.connect(self.save_inline_content)
         self.message_widgets.append(bubble)
         bubble.set_available_width(self._available_bubble_width())
         bubble.set_markdown(text)
@@ -1187,7 +1233,9 @@ class JarvisWindow(QMainWindow):
         self.status.setStyleSheet("color: #FFB454;")
 
         self.worker_thread = QThread()
-        self.worker = AgentWorker(prompt, images)
+        self.worker = AgentWorker(
+            prompt, images, think_enabled=self.reflection_button.isChecked()
+        )
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.token.connect(self.on_token)

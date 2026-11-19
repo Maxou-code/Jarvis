@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap, QIcon
 from PyQt6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
                              QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
@@ -150,6 +150,13 @@ class OffscreenSTLView(QLabel):
         self.pl.render()
         self.refresh()
 
+    def rotate(self, degrees):
+        if self._closed:
+            return
+        self.pl.camera.Azimuth(degrees)
+        self.pl.render()
+        self.refresh()
+
     def set_edges_visible(self, visible):
         if self._closed:
             return
@@ -292,6 +299,13 @@ class Inline3DViewer(QFrame):
                 background:#17485B;
             }
 
+            QPushButton#rotationButton:checked,
+            QPushButton#edgeButton:checked {
+                background:#00AFCF;
+                border-color:#7CEEFF;
+                color:#102B38;
+            }
+
             QPushButton#stlButton {
                 background:#123D32;
                 border-color:#27865F;
@@ -326,24 +340,47 @@ class Inline3DViewer(QFrame):
         top.addWidget(self.status_label)
 
         if show_open_button:
-            open_button = QPushButton("Ouvrir en grand")
+            # ouvrir en grand
+            open_button = QPushButton()
+            open_button.setIcon(QIcon("Icons/arrow-up-right-from-square-solid-full.svg"))
+            open_button.setToolTip("Ouvrir en grand")
+            open_button.setCursor(Qt.CursorShape.PointingHandCursor)
             open_button.clicked.connect(
                 lambda: self.open_requested.emit(self.model_data)
             )
             top.addWidget(open_button)
 
-        reset_button = QPushButton("Réinitialiser la vue")
+        reset_button = QPushButton()
+        reset_button.setIcon(QIcon("Icons/expand-solid-full.svg"))
+        reset_button.setToolTip("Réinitialiser la vue")
+        reset_button.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_button.clicked.connect(self.reset_camera)
         top.addWidget(reset_button)
 
-        self.edge_button = QPushButton("Afficher/Masquer Arrêtes")
+        self.rotation_button = QPushButton()
+        self.rotation_button.setIcon(QIcon("Icons/arrows-spin-solid-full.svg"))
+        self.rotation_button.setObjectName("rotationButton")
+        self.rotation_button.setCheckable(True)
+        self.rotation_button.setChecked(True)
+        self.rotation_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rotation_button.setToolTip("Désactiver la rotation automatique")
+        self.rotation_button.toggled.connect(self.set_auto_rotation)
+        top.addWidget(self.rotation_button)
+
+        self.edge_button = QPushButton()
+        self.edge_button.setIcon(QIcon("Icons/eye-solid-full.svg"))
+        self.edge_button.setObjectName("edgeButton")
         self.edge_button.setCheckable(True)
         self.edge_button.setChecked(True)
-        self.edge_button.setToolTip("Afficher ou masquer les arêtes du maillage")
+        self.edge_button.setToolTip("Masquer les arêtes du maillage")
+        self.edge_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.edge_button.toggled.connect(self.set_edges_visible)
         top.addWidget(self.edge_button)
 
-        export_button = QPushButton("↓  STL")
+        export_button = QPushButton()
+        export_button.setIcon(QIcon("Icons/download-solid-full.svg"))
+        export_button.setToolTip("Enregistrer en STL")
+        export_button.setCursor(Qt.CursorShape.PointingHandCursor)
         export_button.setObjectName("stlButton")
         export_button.clicked.connect(self.export_stl)
         top.addWidget(export_button)
@@ -368,6 +405,9 @@ class Inline3DViewer(QFrame):
         # Initialisation du moteur
         self._mesh = None
         self.view = None
+        self.rotation_timer = QTimer(self)
+        self.rotation_timer.setInterval(50)
+        self.rotation_timer.timeout.connect(self._rotate_model)
 
         try:
             import pyvista as pv
@@ -394,9 +434,12 @@ class Inline3DViewer(QFrame):
             self.viewer_layout.addWidget(self.view)
 
             self.status_label.setText("STL • Rendu actif")
+            self.set_auto_rotation(self.rotation_button.isChecked())
 
         except Exception as exc:
             self.edge_button.setDisabled(True)
+            self.rotation_button.setChecked(False)
+            self.rotation_button.setDisabled(True)
 
             if self.view is not None:
                 self.view.close_renderer()
@@ -418,6 +461,23 @@ class Inline3DViewer(QFrame):
                 "STL généré • aperçu indisponible"
             )
 
+    def set_auto_rotation(self, enabled):
+        if enabled and self.view is not None:
+            self.rotation_button.setToolTip("Désactiver la rotation automatique")
+            self.rotation_timer.start()
+        else:
+            self.rotation_button.setToolTip("Activer la rotation automatique")
+            self.rotation_timer.stop()
+
+    def _rotate_model(self):
+        if self.view is None:
+            self.rotation_timer.stop()
+            return
+        try:
+            self.view.rotate(0.5)
+        except Exception as exc:
+            self.status_label.setToolTip(str(exc))
+
     def reset_camera(self):
         if self.view is not None:
             try:
@@ -426,6 +486,10 @@ class Inline3DViewer(QFrame):
                 self.status_label.setToolTip(str(exc))
 
     def set_edges_visible(self, visible):
+        self.edge_button.setToolTip(
+            "Masquer les arêtes du maillage"
+            if visible else "Afficher les arêtes du maillage"
+        )
         if self.view is not None:
             try:
                 self.view.set_edges_visible(visible)
@@ -469,6 +533,7 @@ class Inline3DViewer(QFrame):
         super().closeEvent(event)
 
     def close_renderer(self):
+        self.rotation_timer.stop()
         if self.view is not None:
             self.view.close_renderer()
             self.view = None

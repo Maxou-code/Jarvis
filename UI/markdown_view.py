@@ -2,11 +2,14 @@ import html
 import html as html_lib
 import json
 import re
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, QUrl, QUrlQuery, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWebEngineCore import QWebEnginePage
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+_APP_BASE_URL = QUrl(Path(__file__).resolve().parent.parent.as_uri() + "/")
 
 # Rendu Markdown fidèle (CommonMark, retours à la ligne, tableaux, code).
 # Installation : pip install markdown-it-py
@@ -88,15 +91,11 @@ def render_code_block(tokens, idx, options, env):
             <span class="code-language">{html.escape(language.upper())}</span>
 
             <div display="flex">
-                <button class="open-code"
-                        onclick="openCode(this)"
-                        type="button">
-                    Ouvrir en grand
+                <button class="open-code" onclick="openCode(this)" type="button">
+                    <img src="Icons/arrow-up-right-from-square-solid-full.svg" alt="" class="open-icon">
                 </button>
-                <button class="copy-code"
-                        onclick="copyCode(this)"
-                        type="button">
-                    Copier
+                <button class="copy-code" onclick="copyCode(this)" type="button">
+                    <img src="Icons/copy-solid-full.svg" alt="" class="copy-icon">
                 </button>
             </div>
         </div>
@@ -192,19 +191,21 @@ MARKDOWN_CSS = """
         margin-left: 3px;
         border: 1px solid #176078;
         background: transparent;
-        border-radius: 3px;
-        padding: 4px 8px;
+        border-radius: 4px;
+        padding: 4px 12px;
         color: #9CCBD5;
         font-family: 'Segoe UI', sans-serif;
         font-size: 11px;
         cursor: pointer;
         transition: background .18s ease, color .18s ease, border-color .18s ease;
     }
+    .copy-icon { width: 18px; height: 18px; vertical-align: middle; }
+    .open-icon { width: 18px; height: 18px; vertical-align: middle; }
     .open-code {
         border: 1px solid #176078;
         background: transparent;
-        border-radius: 3px;
-        padding: 4px 8px;
+        border-radius: 4px;
+        padding: 4px 12px;
         color: #9CCBD5;
         font-family: 'Segoe UI', sans-serif;
         font-size: 11px;
@@ -242,11 +243,11 @@ if _PYGMENTS_FORMATTER is not None:
 COPY_JS_FUNCTION = """
 <script>
 function copyCode(button) {
-    const codeElement = button
-        .closest(".code-block")
-        .querySelector("pre code");
+    const block = button.closest(".code-block");
+    const codeElement = block && block.querySelector("pre code");
+    const icon = button.querySelector(".copy-icon");
 
-    if (!codeElement) {
+    if (!codeElement || !icon) {
         return;
     }
 
@@ -273,7 +274,7 @@ function copyCode(button) {
     textArea.remove();
 
     if (copied) {
-        button.textContent = "Copié !";
+        icon.src = "Icons/copy-regular-full.svg";
         button.classList.add("copied");
 
         if (button._copyTimer) {
@@ -281,12 +282,11 @@ function copyCode(button) {
         }
 
         button._copyTimer = setTimeout(() => {
-            button.textContent = "Copier";
+            icon.src = "Icons/copy-solid-full.svg";
             button.classList.remove("copied");
             button._copyTimer = null;
         }, 2000);
     } else {
-        button.textContent = "Échec";
         button.classList.remove("copied");
     }
 }
@@ -415,7 +415,7 @@ class MarkdownWebView(QWebEngineView):
         if not self._page_initialized:
             self._page_initialized = True
             self._pending_body_html = body_html
-            self.setHtml(markdown_to_html_full(""))
+            self.setHtml(markdown_to_html_full(""), _APP_BASE_URL)
         elif not self._page_ready:
             self._pending_body_html = body_html
         else:

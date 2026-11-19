@@ -72,7 +72,10 @@ def ensure_system_prompt():
         return  # Ollama ne répond pas : nouvel essai au prochain message
     messages[0]["content"] = (base + "\n\n" + SYSTEM_PROMPT.strip()) if base else SYSTEM_PROMPT
     _system_ready = True
-def stream_chat(on_token=None, on_thinking=None, on_tool=None, on_response_start=None):
+def stream_chat(
+    on_token=None, on_thinking=None, on_tool=None, on_response_start=None,
+    think_enabled=THINK_ENABLED,
+):
     """
     Streaming Ollama robuste pour JARVIS.
     Affiche le texte une seule fois et collecte les tool_calls.
@@ -84,7 +87,7 @@ def stream_chat(on_token=None, on_thinking=None, on_tool=None, on_response_start
         "messages": messages,
         "Tools": tools,
         "stream": True,
-        "think": THINK_ENABLED
+        "think": think_enabled
     }
 
     content_parts = []
@@ -259,7 +262,9 @@ def trim_history():
     global messages
     if len(messages) > MAX_HISTORY_MESSAGES + 1:
         messages = [messages[0]] + messages[-MAX_HISTORY_MESSAGES:]
-def ask_jarvis(user_input, user_images=None, callbacks=None):
+def ask_jarvis(
+    user_input, user_images=None, callbacks=None, think_enabled=THINK_ENABLED
+):
     callbacks = callbacks or {}
     ensure_system_prompt()
     user_message = {"role": "user", "content": user_input}
@@ -280,7 +285,8 @@ def ask_jarvis(user_input, user_images=None, callbacks=None):
                 on_token=callbacks.get("on_token"),
                 on_thinking=callbacks.get("on_thinking"),
                 on_tool=callbacks.get("on_tool"),
-                on_response_start=callbacks.get("on_response_start")
+                on_response_start=callbacks.get("on_response_start"),
+                think_enabled=think_enabled,
             )
             recovery_attempts = 0
 
@@ -406,6 +412,9 @@ def ask_jarvis(user_input, user_images=None, callbacks=None):
                     "traceback": traceback.format_exc()[-MAX_ERROR_DETAILS:],
                     "instruction": (
                         "Analyse cette erreur et corrige ton appel d'outil."
+                        if name != "create_3d_model" else
+                        "Analyse cette erreur, puis consulte obligatoirement "
+                        "read_cadquery_guide avant de corriger le script ou de réessayer."
                     )
                 }
 

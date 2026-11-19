@@ -1,6 +1,7 @@
 import json
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                              QToolButton, QVBoxLayout, QWidget)
 
@@ -11,16 +12,27 @@ from UI.viewer3d import Inline3DViewer
 
 class ChartPreview(QFrame):
     open_requested = pyqtSignal(object)
+    save_requested = pyqtSignal(object)
 
     def __init__(self, data, parent=None):
         super().__init__(parent)
         self.data = dict(data or {})
-        self.setStyleSheet(
-            "QFrame { background:#050B12; border:1px solid #174052; border-radius:6px; } "
-            "QLabel { color:#D9F8FF; border:none; font-weight:700; } "
-            "QPushButton { background:#102B38; color:#C8F5FF; border:1px solid #216078; "
-            "border-radius:4px; padding:5px 10px; } "
-            "QPushButton:hover { background:#17485B; }"
+        self.setStyleSheet("""
+            QFrame { background:#050B12; border:1px solid #174052; border-radius:6px; } 
+            QLabel { color:#D9F8FF; border:none; font-weight:700; } 
+            QPushButton { background:#102B38; color:#C8F5FF; border:1px solid #216078; 
+            border-radius:4px; padding:5px 10px; } 
+            QPushButton:hover { background:#17485B; }
+            QPushButton#pngButton {
+                background:#123D32;
+                border-color:#27865F;
+                color:#A5F0C7;
+            }
+
+            QPushButton#pngButton:hover {
+                background:#195641;
+            }
+            """
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 8)
@@ -29,12 +41,25 @@ class ChartPreview(QFrame):
         toolbar = QHBoxLayout()
         title = QLabel(str(self.data.get("title", "Graphique"))[:120])
         toolbar.addWidget(title, 1)
-        open_button = QPushButton("Ouvrir en grand")
+
+        open_button = QPushButton()
+        open_button.setIcon(QIcon("Icons/arrow-up-right-from-square-solid-full.svg"))
+        open_button.setToolTip("Ouvrir en grand")
         open_button.setCursor(Qt.CursorShape.PointingHandCursor)
         open_button.clicked.connect(
             lambda: self.open_requested.emit(self.data)
         )
         toolbar.addWidget(open_button)
+
+        save_button = QPushButton()
+        save_button.setIcon(QIcon("Icons/download-solid-full.svg"))
+        save_button.setToolTip("Enregistrer en PNG")
+        save_button.setObjectName("pngButton")
+        save_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_button.clicked.connect(
+            lambda: self.save_requested.emit(self.data)
+        )
+        toolbar.addWidget(save_button)
         layout.addLayout(toolbar)
 
         self.chart = InlineChart(self.data, self)
@@ -42,6 +67,8 @@ class ChartPreview(QFrame):
 
 
 class CollapsiblePanel(QFrame):
+    open_content_requested = pyqtSignal(str, object)
+
     def __init__(self, title, content="", expanded=False, max_height=320):
         super().__init__()
         self.setObjectName("collapsePanel")
@@ -68,6 +95,7 @@ class CollapsiblePanel(QFrame):
         layout.addWidget(self.toggle)
 
         self.body = MarkdownWebView(self)
+        self.body.open_content_requested.connect(self.open_content_requested)
         self.body.setVisible(expanded)
         self.body.setFixedHeight(48)
         self.body.content_size_changed.connect(self._on_content_size)
@@ -109,6 +137,7 @@ class MarkdownMessage(QFrame):
     """Bulle de message dont les vues HTML sont dimensionnées par WebEngine."""
 
     open_content_requested = pyqtSignal(str, object)
+    save_content_requested = pyqtSignal(str, object)
 
     def __init__(self, role):
         super().__init__()
@@ -172,6 +201,7 @@ class MarkdownMessage(QFrame):
 
     def add_panel(self, title, content="", expanded=False, max_height=320):
         panel = CollapsiblePanel(title, content, expanded, max_height)
+        panel.open_content_requested.connect(self.open_content_requested)
         self.layout.addWidget(panel)
         self.panels.append(panel)
         self._fit()
@@ -181,6 +211,9 @@ class MarkdownMessage(QFrame):
         widget = ChartPreview(data, self)
         widget.open_requested.connect(
             lambda chart_data: self.open_content_requested.emit("graphique", chart_data)
+        )
+        widget.save_requested.connect(
+            lambda chart_data: self.save_content_requested.emit("graphique", chart_data)
         )
         self.layout.addWidget(widget)
         self.extra_widgets.append(widget)
