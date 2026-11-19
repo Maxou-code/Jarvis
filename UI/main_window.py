@@ -34,7 +34,7 @@ from pathlib import Path
 
 # Interface graphique
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QUrl, QSize, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QDesktopServices, QIcon, QSurfaceFormat, QImage
+from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QDesktopServices, QIcon, QSurfaceFormat, QImage, QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
@@ -384,7 +384,7 @@ class JarvisWindow(QMainWindow):
         top_layout.setContentsMargins(28, 12, 28, 12)
         self.history_button = QPushButton("☰")
         self.history_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.history_button.setToolTip("Afficher ou masquer l'historique")
+        self.history_button.setToolTip("Afficher ou masquer l'historique (Ctrl+L)")
         self.history_button.setStyleSheet(
             "QPushButton { background:#0B202B; color:#C6F7FF; border:1px solid #176078; "
             "border-radius:4px; padding:8px 12px; font-size:18px; } "
@@ -433,6 +433,7 @@ class JarvisWindow(QMainWindow):
         self.new_conversation_button = QPushButton("Nouvelle conversation")
         self.new_conversation_button.setIcon(QIcon("Icons/plus-solid-full.svg"))
         self.new_conversation_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_conversation_button.setToolTip("Nouvelle conversation (Ctrl+N)")
         self.new_conversation_button.setStyleSheet(
             "QPushButton { background:#0A202B; color:#8DEEFF; border:1px solid #145064; "
             "border-radius:4px; padding:9px; text-align:left; } "
@@ -627,6 +628,14 @@ class JarvisWindow(QMainWindow):
         main.setRowStretch(2, 0)
         main.setColumnStretch(0, 0)
         main.setColumnStretch(1, 1)
+
+        self.new_conversation_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.new_conversation_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.new_conversation_shortcut.activated.connect(self.new_conversation)
+
+        self.toggle_history_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
+        self.toggle_history_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.toggle_history_shortcut.activated.connect(self.toggle_history)
 
         self._activate_conversation(self.conversation_store.create())
 
