@@ -156,12 +156,36 @@ class CodeEditor(QPlainTextEdit):
 class RoundedWebView(QWebEngineView):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         self.page().setBackgroundColor(QColor("#07121B"))
         self.loadFinished.connect(self._apply_rounded_corners)
 
     def _apply_rounded_corners(self, _success):
         self.page().runJavaScript(
-            "document.documentElement.style.clipPath = 'inset(0 round 4px)';"
+            """
+            const style = document.createElement('style');
+            style.textContent = `
+                ::-webkit-scrollbar {
+                    width: 5px;
+                    height: 5px;
+                }
+                ::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                ::-webkit-scrollbar-thumb {
+                    background: #555;
+                    border-radius: 4px;
+                }
+                ::-webkit-scrollbar-thumb:hover {
+                    background: #777;
+                }
+                ::-webkit-scrollbar-button {
+                    display: none;
+                }
+            `;
+            document.head.appendChild(style);
+            document.documentElement.style.clipPath = 'inset(0 round 4px)';
+            """
         )
 
 

@@ -21,7 +21,10 @@ from pathlib import Path
 
 # Interface graphique
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QSize, QEvent
-from PyQt6.QtGui import QFontMetrics, QPixmap, QDesktopServices, QIcon, QShortcut, QKeySequence
+from PyQt6.QtGui import (
+    QFontMetrics, QPixmap, QDesktopServices, QIcon, QKeySequence,
+    QPainter, QShortcut,
+)
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
@@ -109,20 +112,29 @@ class JarvisWindow(QMainWindow):
         self.worker = None
         self.current_assistant_bubble = None
         self.current_response = ""
-        self._response_recorded = False
         self.current_response_view = None
         self.current_thinking_panel = None
         self.current_thinking = ""
-        self._thinking_recorded = False
         self._rendered_response = None
         self._rendered_thinking = None
         self._markdown_timer = QTimer(self)
         self._markdown_timer.setInterval(160)
         self._markdown_timer.timeout.connect(self._flush_live_markdown)
+        self._loading_icon_size = QSize(18, 18)
+        self._loading_pixmap = QIcon(
+            "Icons/spinner-solid-full.svg"
+        ).pixmap(self._loading_icon_size)
+        self._loading_angle = 0
+        self._loading_timer = QTimer(self)
+        self._loading_timer.setInterval(16)
+        self._loading_timer.timeout.connect(self._advance_loading_indicator)
+        self._loading_conversation_id = None
+        self._conversation_load_generation = 0
         self.attachments = []
         self.message_widgets = []
         self.conversation_store = ConversationStore(WORKSPACE / "conversations.sqlite3")
         self.current_conversation = None
+        self._generation = None
 
         self.setStyleSheet("""
             QMainWindow, QWidget#root {
@@ -158,7 +170,7 @@ class JarvisWindow(QMainWindow):
                 border: 1px solid #145064;
                 border-radius: 4px;
                 padding: 10px 9px;
-                margin: 3px 0;
+                margin: 3px 0px 3px 0px;
             }
             QListWidget#historyList::item:hover {
                 background: #103746;
@@ -403,10 +415,19 @@ class JarvisWindow(QMainWindow):
         history_layout.addWidget(self.new_conversation_button)
         self.history_list = ConversationListWidget()
         self.history_list.setObjectName("historyList")
+        self.history_list.setIconSize(self._loading_icon_size)
+        self.history_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.history_list.setCursor(Qt.CursorShape.PointingHandCursor)
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_conversation_menu)
         self.history_list.currentItemChanged.connect(self.open_conversation)
+        self.history_list.verticalScrollBar().rangeChanged.connect(
+            lambda _minimum, _maximum: QTimer.singleShot(
+                0, self._resize_conversation_items
+            )
+        )
         history_layout.addWidget(self.history_list, 1)
 
         self.scroll = QScrollArea()
@@ -631,24 +652,78 @@ class JarvisWindow(QMainWindow):
         self.history_list.clear()
         selected_item = None
         for conversation in self.conversation_store.list_conversations():
-            width = min(
-                self.history_list.viewport().width(),
-                self.history_sidebar.width() - 28,
-            ) - 36
-            title = QFontMetrics(self.history_list.font()).elidedText(
-                conversation["title"],
-                Qt.TextElideMode.ElideRight,
-                max(80, width),
-            )
-            item = QListWidgetItem(title)
-            item.setToolTip(conversation["title"])
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, conversation["id"])
+            item.setData(Qt.ItemDataRole.UserRole + 1, conversation["title"])
             self.history_list.addItem(item)
+            self._update_conversation_item(item)
             if conversation["id"] == selected_id:
                 selected_item = item
         if selected_item is not None:
             self.history_list.setCurrentItem(selected_item)
         self.history_list.blockSignals(False)
+        QTimer.singleShot(0, self._resize_conversation_items)
+
+    def _resize_conversation_items(self):
+        width = self.history_list.viewport().width()
+        if width <= 0:
+            return
+        for index in range(self.history_list.count()):
+            item = self.history_list.item(index)
+            item.setSizeHint(QSize(width, max(44, item.sizeHint().height())))
+
+    def _update_conversation_item(self, item):
+        conversation_id = item.data(Qt.ItemDataRole.UserRole)
+        title = item.data(Qt.ItemDataRole.UserRole + 1)
+        generation = self._generation
+        is_generating = (
+            generation is not None
+            and generation["conversation"]["id"] == conversation_id
+        )
+        is_loading = conversation_id == self._loading_conversation_id
+        show_spinner = is_generating or is_loading
+        icon_width = self._loading_icon_size.width() + 8 if show_spinner else 0
+        width = self.history_list.viewport().width() - (2 * 9 + 2 + icon_width)
+        item.setText(QFontMetrics(self.history_list.font()).elidedText(
+            title,
+            Qt.TextElideMode.ElideRight,
+            max(0, width),
+        ))
+        if show_spinner:
+            rotated = QPixmap(self._loading_icon_size)
+            rotated.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(rotated)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.translate(
+                self._loading_icon_size.width() / 2,
+                self._loading_icon_size.height() / 2,
+            )
+            painter.rotate(self._loading_angle)
+            painter.drawPixmap(
+                -self._loading_pixmap.width() // 2,
+                -self._loading_pixmap.height() // 2,
+                self._loading_pixmap,
+            )
+            painter.end()
+            item.setIcon(QIcon(rotated))
+        else:
+            item.setIcon(QIcon())
+        item.setToolTip(title)
+
+    def _advance_loading_indicator(self):
+        if self._generation is None and self._loading_conversation_id is None:
+            self._loading_timer.stop()
+            return
+        self._loading_angle = (self._loading_angle + 6) % 360
+        for index in range(self.history_list.count()):
+            item = self.history_list.item(index)
+            conversation_id = item.data(Qt.ItemDataRole.UserRole)
+            is_generating = (
+                self._generation is not None
+                and conversation_id == self._generation["conversation"]["id"]
+            )
+            if is_generating or conversation_id == self._loading_conversation_id:
+                self._update_conversation_item(item)
 
     def show_conversation_menu(self, position):
         item = self.history_list.itemAt(position)
@@ -689,6 +764,15 @@ class JarvisWindow(QMainWindow):
         conversation = self.conversation_store.get(conversation_id)
         if conversation is None:
             return
+        if (
+            self._generation is not None
+            and conversation_id == self._generation["conversation"]["id"]
+        ):
+            QMessageBox.information(
+                self, "Conversation en cours",
+                "Cette conversation ne peut pas être supprimée pendant sa génération.",
+            )
+            return
         answer = QMessageBox.question(
             self,
             "Supprimer la conversation",
@@ -708,39 +792,114 @@ class JarvisWindow(QMainWindow):
         else:
             self._refresh_conversation_list()
 
-    def _activate_conversation(self, conversation):
+    def _activate_conversation(self, conversation, animated=False):
         if conversation is None:
             return
+        self._conversation_load_generation += 1
+        load_generation = self._conversation_load_generation
+        self._loading_conversation_id = None
+        self._sync_loading_timer()
+        self._persist_generation_conversation()
         self.current_conversation = conversation
-        set_conversation_history(conversation["messages"])
+        if not (self.worker_thread and self.worker_thread.isRunning()):
+            set_conversation_history(conversation["messages"])
         self.input.clear()
         self.attachments.clear()
         self._refresh_attachment_row()
         self._clear_messages()
-        for message in conversation["messages"]:
-            role = message.get("role")
-            if role == "user":
-                self.current_assistant_bubble = None
-                self.add_message(message["content"], "user")
-            elif role == "assistant":
-                self.ensure_assistant_bubble().add_markdown_block(message["content"])
-            elif role == "thinking":
-                panel = self.ensure_assistant_bubble().add_panel(
-                    "Réflexion du modèle", expanded=True, max_height=None
+        messages = conversation["messages"]
+        if animated and messages:
+            self._loading_conversation_id = conversation["id"]
+            self._refresh_conversation_list()
+            self._sync_loading_timer()
+            QTimer.singleShot(
+                16,
+                lambda: self._restore_conversation_messages(
+                    conversation, load_generation, 0
+                ),
+            )
+            return
+
+        for message in messages:
+            self._restore_conversation_message(message)
+        self._finish_conversation_activation(conversation, load_generation)
+
+    def _restore_conversation_message(self, message):
+        role = message.get("role")
+        if role == "user":
+            self.current_assistant_bubble = None
+            self.add_message(message["content"], "user")
+        elif role == "assistant":
+            self.ensure_assistant_bubble().add_markdown_block(message["content"])
+        elif role == "thinking":
+            panel = self.ensure_assistant_bubble().add_panel(
+                "Réflexion du modèle", expanded=True, max_height=None
+            )
+            panel.set_markdown(message["content"])
+        elif role == "system":
+            self.add_system_panel(
+                message["title"], message["details"],
+                expanded=message.get("expanded", False),
+            )
+        elif role == "chart":
+            self.ensure_assistant_bubble().add_chart(message["data"])
+        elif role == "model3d":
+            try:
+                self.ensure_assistant_bubble().add_3d_model(message["data"])
+            except Exception as exc:
+                self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
+
+    def _restore_conversation_messages(self, conversation, load_generation, offset):
+        if load_generation != self._conversation_load_generation:
+            return
+        messages = conversation["messages"]
+        next_offset = min(offset + 5, len(messages))
+        for message in messages[offset:next_offset]:
+            self._restore_conversation_message(message)
+        if next_offset < len(messages):
+            QTimer.singleShot(
+                16,
+                lambda: self._restore_conversation_messages(
+                    conversation, load_generation, next_offset
+                ),
+            )
+            return
+        self._loading_conversation_id = None
+        self._sync_loading_timer()
+        self._finish_conversation_activation(conversation, load_generation)
+
+    def _finish_conversation_activation(self, conversation, load_generation):
+        if load_generation != self._conversation_load_generation:
+            return
+        generation = self._generation
+        if (
+            generation is not None
+            and generation["conversation"]["id"] == conversation["id"]
+        ):
+            self.current_response = generation["response"]
+            self.current_thinking = generation["thinking"]
+            if generation["response_message"] is not None and self.current_assistant_bubble:
+                self.current_response_view = (
+                    self.current_assistant_bubble.last_markdown_view
                 )
-                panel.set_markdown(message["content"])
-            elif role == "system":
-                self.add_system_panel(
-                    message["title"], message["details"],
-                    expanded=message.get("expanded", False),
+                self._rendered_response = generation["response"]
+            elif (
+                generation["response_block_started"]
+                and self.current_assistant_bubble
+            ):
+                self.current_response_view = (
+                    self.current_assistant_bubble.add_markdown_block("")
                 )
-            elif role == "chart":
-                self.ensure_assistant_bubble().add_chart(message["data"])
-            elif role == "model3d":
-                try:
-                    self.ensure_assistant_bubble().add_3d_model(message["data"])
-                except Exception as exc:
-                    self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
+                self._rendered_response = None
+            if generation["thinking_message"] is not None and self.current_assistant_bubble:
+                self.current_thinking_panel = next(
+                    (
+                        panel for panel in reversed(self.current_assistant_bubble.panels)
+                        if panel.title == "Réflexion du modèle"
+                    ),
+                    None,
+                )
+                self._rendered_thinking = generation["thinking"]
         self._refresh_conversation_list()
         for index in range(self.history_list.count()):
             item = self.history_list.item(index)
@@ -748,16 +907,20 @@ class JarvisWindow(QMainWindow):
                 self.history_list.setCurrentItem(item)
                 break
 
+    def _sync_loading_timer(self):
+        if self._generation is not None or self._loading_conversation_id is not None:
+            self._loading_timer.start()
+        else:
+            self._loading_timer.stop()
+
     def _clear_messages(self):
         self.close_preview()
         self._markdown_timer.stop()
         self.current_assistant_bubble = None
         self.current_response = ""
-        self._response_recorded = False
         self.current_response_view = None
         self.current_thinking_panel = None
         self.current_thinking = ""
-        self._thinking_recorded = False
         self._rendered_response = None
         self._rendered_thinking = None
         self.message_widgets.clear()
@@ -783,9 +946,16 @@ class JarvisWindow(QMainWindow):
         conversation_id = current.data(Qt.ItemDataRole.UserRole)
         if conversation_id == self.current_conversation["id"]:
             return
-        conversation = self.conversation_store.get(conversation_id)
+        generation = self._generation
+        if (
+            generation is not None
+            and conversation_id == generation["conversation"]["id"]
+        ):
+            conversation = generation["conversation"]
+        else:
+            conversation = self.conversation_store.get(conversation_id)
         if conversation is not None:
-            self._activate_conversation(conversation)
+            self._activate_conversation(conversation, animated=True)
 
     def authorize_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Autoriser un dossier pour JARVIS", str(Path.home()))
@@ -844,6 +1014,7 @@ class JarvisWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._refresh_content_widths)
+        QTimer.singleShot(0, self._resize_conversation_items)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1186,24 +1357,35 @@ class JarvisWindow(QMainWindow):
         self.file_row.hide()
         self.current_assistant_bubble = None
         self.current_response = ""
-        self._response_recorded = False
         self.current_response_view = None
         self.current_thinking_panel = None
         self.current_thinking = ""
-        self._thinking_recorded = False
         self._rendered_response = None
         self._rendered_thinking = None
         self._markdown_timer.stop()
+        conversation = self.current_conversation
+        self._generation = {
+            "conversation": conversation,
+            "response": "",
+            "response_message": None,
+            "response_block_started": False,
+            "thinking": "",
+            "thinking_message": None,
+        }
+        self._loading_angle = 0
+        self._refresh_conversation_list()
+        self._sync_loading_timer()
         self.send_button.setDisabled(True)
         self.attach_button.setDisabled(True)
-        self.history_list.setDisabled(True)
-        self.new_conversation_button.setDisabled(True)
         self.status.setText("●  JARVIS réfléchit…")
         self.status.setStyleSheet("color: #FFB454;")
 
         self.worker_thread = QThread()
         self.worker = AgentWorker(
-            prompt, images, think_enabled=self.reflection_button.isChecked()
+            prompt,
+            conversation["id"],
+            images,
+            think_enabled=self.reflection_button.isChecked(),
         )
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
@@ -1218,64 +1400,119 @@ class JarvisWindow(QMainWindow):
         self.worker_thread.finished.connect(self.cleanup_worker)
         self.worker_thread.start()
 
-    def start_response(self):
-        # Termine le rendu du tour précédent avant d'ajouter un nouveau bloc.
-        self._flush_live_markdown()
-        self._record_current_response()
-        self._record_current_thinking()
-        bubble = self.ensure_assistant_bubble()
-        self.current_response = ""
-        self._response_recorded = False
-        self._rendered_response = None
-        self.current_thinking_panel = None
-        self.current_thinking = ""
-        self._thinking_recorded = False
-        self._rendered_thinking = None
-        self.current_response_view = bubble.add_markdown_block("")
-        self.scroll_to_bottom()
-
-    def on_token(self, token):
-        bubble = self.ensure_assistant_bubble()
-        if self.current_response_view is None:
-            self.current_response_view = bubble.add_markdown_block("")
-            self._rendered_response = None
-        self.current_response += token
-        if not self._markdown_timer.isActive():
-            self._markdown_timer.start()
-
-    def on_thinking(self, token):
-        if not token:
+    def start_response(self, conversation_id):
+        generation = self._generation_for(conversation_id)
+        if generation is None:
             return
-        bubble = self.ensure_assistant_bubble()
-        if self.current_thinking_panel is None:
+        if self._is_generation_visible(generation):
+            self._flush_live_markdown()
+        # Termine le rendu du tour précédent avant d'ajouter un nouveau bloc.
+        self._record_current_response(conversation_id)
+        self._record_current_thinking(conversation_id)
+        generation["response"] = ""
+        generation["response_message"] = None
+        generation["response_block_started"] = True
+        generation["thinking"] = ""
+        generation["thinking_message"] = None
+        if self._is_generation_visible(generation):
+            bubble = self.ensure_assistant_bubble()
+            self.current_response = ""
+            self._rendered_response = None
+            self.current_thinking_panel = None
             self.current_thinking = ""
             self._rendered_thinking = None
-            self.current_thinking_panel = bubble.add_panel(
-                "Réflexion du modèle", expanded=True, max_height=None
-            )
-        self.current_thinking += token
-        self._thinking_recorded = False
+            self.current_response_view = bubble.add_markdown_block("")
+            self.scroll_to_bottom()
+
+    def on_token(self, conversation_id, token):
+        generation = self._generation_for(conversation_id)
+        if generation is None:
+            return
+        generation["response"] += token
+        self._update_generation_message(generation, "response")
+        if self._is_generation_visible(generation):
+            bubble = self.ensure_assistant_bubble()
+            if self.current_response_view is None:
+                self.current_response_view = bubble.add_markdown_block("")
+                self._rendered_response = None
+            self.current_response = generation["response"]
         if not self._markdown_timer.isActive():
             self._markdown_timer.start()
 
-    def _record_current_response(self):
-        if self.current_response and not self._response_recorded:
-            self.current_conversation["messages"].append({
-                "role": "assistant",
-                "content": self.current_response,
-            })
-            self._response_recorded = True
+    def on_thinking(self, conversation_id, token):
+        if not token:
+            return
+        generation = self._generation_for(conversation_id)
+        if generation is None:
+            return
+        generation["thinking"] += token
+        self._update_generation_message(generation, "thinking")
+        if self._is_generation_visible(generation):
+            bubble = self.ensure_assistant_bubble()
+            if self.current_thinking_panel is None:
+                self.current_thinking = ""
+                self._rendered_thinking = None
+                self.current_thinking_panel = bubble.add_panel(
+                    "Réflexion du modèle", expanded=True, max_height=None
+                )
+            self.current_thinking = generation["thinking"]
+        if not self._markdown_timer.isActive():
+            self._markdown_timer.start()
 
-    def _record_current_thinking(self):
-        if self.current_thinking and not self._thinking_recorded:
-            self.current_conversation["messages"].append({
-                "role": "thinking",
-                "content": self.current_thinking,
+    def _generation_for(self, conversation_id):
+        generation = self._generation
+        if (
+            generation is None
+            or generation["conversation"]["id"] != conversation_id
+        ):
+            return None
+        return generation
+
+    def _is_generation_visible(self, generation):
+        return (
+            self.current_conversation is not None
+            and self.current_conversation["id"] == generation["conversation"]["id"]
+        )
+
+    def _update_generation_message(self, generation, kind):
+        content_key = kind
+        message_key = f"{kind}_message"
+        content = generation[content_key]
+        if not content:
+            return
+        messages = generation["conversation"]["messages"]
+        message_index = generation[message_key]
+        if message_index is None:
+            messages.append({
+                "role": "assistant" if kind == "response" else "thinking",
+                "content": content,
             })
-            self._thinking_recorded = True
+            generation[message_key] = len(messages) - 1
+        else:
+            messages[message_index]["content"] = content
+
+    def _record_current_response(self, conversation_id=None):
+        generation = (
+            self._generation_for(conversation_id)
+            if conversation_id is not None else self._generation
+        )
+        if generation is not None:
+            self._update_generation_message(generation, "response")
+
+    def _record_current_thinking(self, conversation_id=None):
+        generation = (
+            self._generation_for(conversation_id)
+            if conversation_id is not None else self._generation
+        )
+        if generation is not None:
+            self._update_generation_message(generation, "thinking")
 
     def _flush_live_markdown(self):
         """Rend les flux à intervalle régulier plutôt qu'à chaque token."""
+        generation = self._generation
+        if generation is not None and not self._is_generation_visible(generation):
+            self._persist_generation_conversation()
+            return
         changed = False
         if (
                 self.current_response_view is not None
@@ -1295,51 +1532,70 @@ class JarvisWindow(QMainWindow):
 
         if changed:
             self.scroll_to_bottom()
+            self._persist_generation_conversation()
 
-    def on_tool_event(self, state, name, details):
-        self._flush_live_markdown()
-        self._record_current_response()
-        self._record_current_thinking()
+    def on_tool_event(self, conversation_id, state, name, details):
+        generation = self._generation_for(conversation_id)
+        if generation is None:
+            return
+        if self._is_generation_visible(generation):
+            self._flush_live_markdown()
+        self._record_current_response(conversation_id)
+        self._record_current_thinking(conversation_id)
+        conversation = generation["conversation"]
+        visible = self._is_generation_visible(generation)
+        generation["thinking"] = ""
+        generation["thinking_message"] = None
         if name == "plot_chart" and isinstance(details, dict):
             payload = details.get("result", {})
             chart_data = payload.get("chart") if isinstance(payload, dict) else None
             if chart_data and state == "Résultat":
-                self.ensure_assistant_bubble().add_chart(chart_data)
-                self.current_conversation["messages"].append({
+                if visible:
+                    self.ensure_assistant_bubble().add_chart(chart_data)
+                conversation["messages"].append({
                     "role": "chart",
                     "data": chart_data,
                 })
-                self.current_thinking_panel = None
-                self.current_thinking = ""
-                self._thinking_recorded = False
-                self.scroll_to_bottom()
+                if visible:
+                    self.current_thinking_panel = None
+                    self.current_thinking = ""
+                    self.scroll_to_bottom()
+                self._persist_generation_conversation()
                 return
         if name == "create_3d_model" and isinstance(details, dict):
             payload = details.get("result", {})
             model_data = payload.get("model") if isinstance(payload, dict) else None
             if model_data and state == "Résultat":
-                try:
-                    self.ensure_assistant_bubble().add_3d_model(model_data)
-                    self.current_conversation["messages"].append({
+                if visible:
+                    try:
+                        self.ensure_assistant_bubble().add_3d_model(model_data)
+                        conversation["messages"].append({
+                            "role": "model3d",
+                            "data": model_data,
+                        })
+                    except Exception as exc:
+                        self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
+                        conversation["messages"].append({
+                            "role": "system",
+                            "title": "Affichage 3D impossible",
+                            "details": str(exc),
+                            "expanded": True,
+                        })
+                else:
+                    conversation["messages"].append({
                         "role": "model3d",
                         "data": model_data,
                     })
-                except Exception as exc:
-                    self.add_system_panel("Affichage 3D impossible", str(exc), expanded=True)
-                    self.current_conversation["messages"].append({
-                        "role": "system",
-                        "title": "Affichage 3D impossible",
-                        "details": str(exc),
-                        "expanded": True,
-                    })
-                self.current_thinking_panel = None
-                self.current_thinking = ""
-                self._thinking_recorded = False
-                self.scroll_to_bottom()
+                if visible:
+                    self.current_thinking_panel = None
+                    self.current_thinking = ""
+                    self.scroll_to_bottom()
+                self._persist_generation_conversation()
                 return
         title = f"{state} - {name}"
-        self.add_system_panel(title, details)
-        self.current_conversation["messages"].append({
+        if visible:
+            self.add_system_panel(title, details)
+        conversation["messages"].append({
             "role": "system",
             "title": title,
             "details": (
@@ -1347,41 +1603,53 @@ class JarvisWindow(QMainWindow):
                 if isinstance(details, (dict, list)) else str(details or "")
             ),
         })
+        self._persist_generation_conversation()
         # Un nouvel appel d'outil peut être suivi d'un nouveau cycle de réflexion.
-        self.current_thinking_panel = None
-        self.current_thinking = ""
-        self._thinking_recorded = False
+        if visible:
+            self.current_thinking_panel = None
+            self.current_thinking = ""
 
-    def on_finished(self):
+    def on_finished(self, conversation_id):
+        generation = self._generation_for(conversation_id)
+        if generation is None:
+            return
         self._markdown_timer.stop()
-        self._flush_live_markdown()
-        self._record_current_response()
-        self._record_current_thinking()
+        if self._is_generation_visible(generation):
+            self._flush_live_markdown()
+        self._record_current_response(conversation_id)
+        self._record_current_thinking(conversation_id)
         self.send_button.setDisabled(False)
         self.attach_button.setDisabled(False)
         self.status.setText("●  Prêt")
         self.status.setStyleSheet("color: #70D9A6;")
-        fallback_response = False
-        if self.current_assistant_bubble is None:
-            self.add_message("Traitement terminé.", "assistant")
-            fallback_response = True
-        elif not self.current_response and not self.current_assistant_bubble.markdown_views:
-            self.current_assistant_bubble.add_markdown_block("Traitement terminé.")
-            fallback_response = True
-        if fallback_response:
-            self.current_conversation["messages"].append({
+        if not generation["response_block_started"]:
+            if self._is_generation_visible(generation):
+                if self.current_assistant_bubble is None:
+                    self.add_message("Traitement terminé.", "assistant")
+                elif not self.current_assistant_bubble.markdown_views:
+                    self.current_assistant_bubble.add_markdown_block("Traitement terminé.")
+            generation["conversation"]["messages"].append({
                 "role": "assistant",
                 "content": "Traitement terminé.",
             })
-        self._persist_current_conversation()
+        self._persist_generation_conversation()
+        self._generation = None
+        self._sync_loading_timer()
+        self._refresh_conversation_list()
+        if self.current_conversation is not None:
+            set_conversation_history(self.current_conversation["messages"])
 
-    def on_failed(self, error):
+    def on_failed(self, conversation_id, error):
+        generation = self._generation_for(conversation_id)
+        if generation is None:
+            return
         self._markdown_timer.stop()
-        self._flush_live_markdown()
-        self._record_current_response()
-        self._record_current_thinking()
-        self.add_system_panel("Erreur système - JARVIS", error, expanded=True)
-        self.current_conversation["messages"].append({
+        if self._is_generation_visible(generation):
+            self._flush_live_markdown()
+            self.add_system_panel("Erreur système - JARVIS", error, expanded=True)
+        self._record_current_response(conversation_id)
+        self._record_current_thinking(conversation_id)
+        generation["conversation"]["messages"].append({
             "role": "system",
             "title": "Erreur système - JARVIS",
             "details": error,
@@ -1391,11 +1659,25 @@ class JarvisWindow(QMainWindow):
         self.status.setStyleSheet("color: #FF6B68;")
         self.send_button.setDisabled(False)
         self.attach_button.setDisabled(False)
-        self._persist_current_conversation()
+        self._persist_generation_conversation()
+        self._generation = None
+        self._sync_loading_timer()
+        self._refresh_conversation_list()
+        if self.current_conversation is not None:
+            set_conversation_history(self.current_conversation["messages"])
+
+    def _persist_generation_conversation(self):
+        if self._generation is not None:
+            self._persist_conversation(self._generation["conversation"])
 
     def _persist_current_conversation(self):
+        self._persist_conversation(self.current_conversation)
+
+    def _persist_conversation(self, conversation):
+        if conversation is None:
+            return
         try:
-            self.conversation_store.save(self.current_conversation)
+            self.conversation_store.save(conversation)
         except sqlite3.Error as exc:
             QMessageBox.warning(
                 self, "Historique indisponible",

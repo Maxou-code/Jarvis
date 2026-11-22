@@ -382,7 +382,7 @@ class MarkdownWebView(QWebEngineView):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.page().setBackgroundColor(QColor(0, 0, 0, 0))
         self.loadFinished.connect(self._on_page_loaded)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
 
     def _on_custom_url_requested(self, url):
         query = QUrlQuery(url)
