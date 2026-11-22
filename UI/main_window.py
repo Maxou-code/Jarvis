@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 
 # Interface graphique
-from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QSize, QEvent
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QSize, QEvent, QRect
 from PyQt6.QtGui import (
     QFontMetrics, QPixmap, QDesktopServices, QIcon, QKeySequence,
     QPainter, QShortcut,
@@ -700,9 +700,14 @@ class JarvisWindow(QMainWindow):
             )
             painter.rotate(self._loading_angle)
             painter.drawPixmap(
-                -self._loading_pixmap.width() // 2,
-                -self._loading_pixmap.height() // 2,
+                QRect(
+                    -(self._loading_icon_size.width() // 2),
+                    -(self._loading_icon_size.height() // 2),
+                    self._loading_icon_size.width(),
+                    self._loading_icon_size.height(),
+                ),
                 self._loading_pixmap,
+                self._loading_pixmap.rect(),
             )
             painter.end()
             item.setIcon(QIcon(rotated))
