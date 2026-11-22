@@ -74,7 +74,7 @@ def ensure_system_prompt():
     _system_ready = True
 def stream_chat(
     on_token=None, on_thinking=None, on_tool=None, on_response_start=None,
-    think_enabled=THINK_ENABLED,
+    think_enabled=THINK_ENABLED, cancel_event=None, on_stream_response=None,
 ):
     """
     Streaming Ollama robuste pour JARVIS.
@@ -106,6 +106,10 @@ def stream_chat(
             json=payload,
             stream=True
         )
+        if on_stream_response:
+            on_stream_response(response)
+        if cancel_event is not None and cancel_event.is_set():
+            return {"role": "assistant", "content": ""}
 
         # Diagnostic détaillé des erreurs HTTP
         if not response.ok:
@@ -128,6 +132,8 @@ def stream_chat(
         thinking_length = 0
 
         for raw_line in response.iter_lines(decode_unicode=True):
+            if cancel_event is not None and cancel_event.is_set():
+                return {"role": "assistant", "content": ""}
 
             if not raw_line:
                 continue
@@ -247,6 +253,8 @@ def stream_chat(
     finally:
         if response is not None:
             response.close()
+        if on_stream_response:
+            on_stream_response(None)
 def append_tool_result(call, name, result):
     tool_message = {
         "role": "tool",
@@ -263,9 +271,12 @@ def trim_history():
     if len(messages) > MAX_HISTORY_MESSAGES + 1:
         messages = [messages[0]] + messages[-MAX_HISTORY_MESSAGES:]
 def ask_jarvis(
-    user_input, user_images=None, callbacks=None, think_enabled=THINK_ENABLED
+    user_input, user_images=None, callbacks=None, think_enabled=THINK_ENABLED,
+    cancel_event=None,
 ):
     callbacks = callbacks or {}
+    if cancel_event is not None and cancel_event.is_set():
+        return
     ensure_system_prompt()
     user_message = {"role": "user", "content": user_input}
     if user_images:
@@ -275,6 +286,8 @@ def ask_jarvis(
     recovery_attempts = 0
 
     for round_number in range(1, MAX_TOOL_ROUNDS + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            return
 
         # ----------------------------------------------------
         # 1. Demande au modèle
@@ -287,10 +300,16 @@ def ask_jarvis(
                 on_tool=callbacks.get("on_tool"),
                 on_response_start=callbacks.get("on_response_start"),
                 think_enabled=think_enabled,
+                cancel_event=cancel_event,
+                on_stream_response=callbacks.get("on_stream_response"),
             )
+            if cancel_event is not None and cancel_event.is_set():
+                return
             recovery_attempts = 0
 
         except Exception as error:
+            if cancel_event is not None and cancel_event.is_set():
+                return
             recovery_attempts += 1
 
             error_type = type(error).__name__
@@ -344,6 +363,8 @@ def ask_jarvis(
         # ----------------------------------------------------
 
         for call in calls:
+            if cancel_event is not None and cancel_event.is_set():
+                return
             function_data = call.get("function") or {}
             name = function_data.get("name", "")
 

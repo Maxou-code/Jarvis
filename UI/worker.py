@@ -1,3 +1,5 @@
+from threading import Event, Lock
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from Core.agent import ask_jarvis
@@ -20,6 +22,21 @@ class AgentWorker(QObject):
         self.conversation_id = conversation_id
         self.images = images or []
         self.think_enabled = think_enabled
+        self._cancel_event = Event()
+        self._response_lock = Lock()
+        self._active_response = None
+
+    def cancel(self):
+        self._cancel_event.set()
+        with self._response_lock:
+            if self._active_response is not None:
+                self._active_response.close()
+
+    def _set_active_response(self, response):
+        with self._response_lock:
+            self._active_response = response
+            if response is not None and self._cancel_event.is_set():
+                response.close()
 
     def run(self):
         callbacks = {
@@ -29,6 +46,7 @@ class AgentWorker(QObject):
             "on_tool": lambda state, name, details: self.tool_event.emit(
                 self.conversation_id, state, name, details
             ),
+            "on_stream_response": self._set_active_response,
         }
         try:
             ask_jarvis(
@@ -36,6 +54,7 @@ class AgentWorker(QObject):
                 user_images=self.images,
                 callbacks=callbacks,
                 think_enabled=self.think_enabled,
+                cancel_event=self._cancel_event,
             )
             self.finished.emit(self.conversation_id)
         except Exception as exc:

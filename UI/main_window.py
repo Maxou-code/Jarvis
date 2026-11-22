@@ -22,7 +22,7 @@ from pathlib import Path
 # Interface graphique
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QSize, QEvent, QRect
 from PyQt6.QtGui import (
-    QFontMetrics, QPixmap, QDesktopServices, QIcon, QKeySequence,
+    QColor, QFontMetrics, QPixmap, QDesktopServices, QIcon, QKeySequence,
     QPainter, QShortcut,
 )
 from PyQt6.QtWidgets import (
@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
     QSizePolicy, QFileDialog, QListWidget, QListWidgetItem,
     QMessageBox, QDialog, QDialogButtonBox, QGridLayout, QInputDialog, QMenu,
-    QSplitter
+    QGraphicsDropShadowEffect, QSplitter
 )
 
 # Rendu Markdown fidèle (CommonMark, retours à la ligne, tableaux, code).
@@ -257,6 +257,19 @@ class JarvisWindow(QMainWindow):
                 background: #102B38;
                 color: #55717D;
                 border-color: #164456;
+            }
+            QPushButton#send[stopping="true"] {
+                background: #450101;
+                color: #3A0710;
+                border: 1px solid #ff1717;
+            }
+            QPushButton#send[stopping="true"]:hover {
+                background: #690101;
+                border: 1px solid #FF0037;
+            }
+            QPushButton#send[stopping="true"]:pressed {
+                background: #450101;
+                border: 1px solid #FF1744;
             }
 
             QPushButton#reflectionToggle {
@@ -556,7 +569,9 @@ class JarvisWindow(QMainWindow):
         self.send_button.setIcon(QIcon("Icons/paper-plane-regular-full.svg"))
         self.send_button.setIconSize(QSize(22, 22))
         self.send_button.setObjectName("send")
+        self.send_button.setProperty("stopping", False)
         self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_button.setToolTip("Envoyer")
         self.send_button.clicked.connect(self.send_message)
         composer_layout.addWidget(self.send_button)
         # Barre centrée, largeur max ENTRY_MAX_WIDTH (même largeur que la conversation).
@@ -1335,6 +1350,7 @@ class JarvisWindow(QMainWindow):
 
     def send_message(self):
         if self.worker_thread and self.worker_thread.isRunning():
+            self.stop_generation()
             return
         prompt = self.input.toPlainText().strip()
         if not prompt and not self.attachments:
@@ -1376,11 +1392,14 @@ class JarvisWindow(QMainWindow):
             "response_block_started": False,
             "thinking": "",
             "thinking_message": None,
+            "cancelled": False,
         }
         self._loading_angle = 0
         self._refresh_conversation_list()
         self._sync_loading_timer()
-        self.send_button.setDisabled(True)
+        self._set_send_button_stopping(True)
+        self.send_button.setIcon(QIcon("Icons/stop-solid-full.svg"))
+        self.send_button.setToolTip("Arrêter la génération")
         self.attach_button.setDisabled(True)
         self.status.setText("●  JARVIS réfléchit…")
         self.status.setStyleSheet("color: #FFB454;")
@@ -1404,6 +1423,27 @@ class JarvisWindow(QMainWindow):
         self.worker.failed.connect(self.worker_thread.quit)
         self.worker_thread.finished.connect(self.cleanup_worker)
         self.worker_thread.start()
+
+    def stop_generation(self):
+        generation = self._generation
+        if generation is None or generation["cancelled"]:
+            return
+        generation["cancelled"] = True
+        self.status.setText("●  Arrêt en cours…")
+        self.status.setStyleSheet("color: #FFB454;")
+        if self.worker is not None:
+            self.worker.cancel()
+
+    def _reset_send_button(self):
+        self._set_send_button_stopping(False)
+        self.send_button.setIcon(QIcon("Icons/paper-plane-regular-full.svg"))
+        self.send_button.setToolTip("Envoyer")
+
+    def _set_send_button_stopping(self, stopping):
+        self.send_button.setProperty("stopping", stopping)
+        style = self.send_button.style()
+        style.unpolish(self.send_button)
+        style.polish(self.send_button)
 
     def start_response(self, conversation_id):
         generation = self._generation_for(conversation_id)
@@ -1623,11 +1663,15 @@ class JarvisWindow(QMainWindow):
             self._flush_live_markdown()
         self._record_current_response(conversation_id)
         self._record_current_thinking(conversation_id)
-        self.send_button.setDisabled(False)
+        self._reset_send_button()
         self.attach_button.setDisabled(False)
-        self.status.setText("●  Prêt")
-        self.status.setStyleSheet("color: #70D9A6;")
-        if not generation["response_block_started"]:
+        if generation["cancelled"]:
+            self.status.setText("●  Génération arrêtée")
+            self.status.setStyleSheet("color: #FFB454;")
+        else:
+            self.status.setText("●  Prêt")
+            self.status.setStyleSheet("color: #70D9A6;")
+        if not generation["response_block_started"] and not generation["cancelled"]:
             if self._is_generation_visible(generation):
                 if self.current_assistant_bubble is None:
                     self.add_message("Traitement terminé.", "assistant")
@@ -1662,7 +1706,7 @@ class JarvisWindow(QMainWindow):
         })
         self.status.setText("●  Erreur")
         self.status.setStyleSheet("color: #FF6B68;")
-        self.send_button.setDisabled(False)
+        self._reset_send_button()
         self.attach_button.setDisabled(False)
         self._persist_generation_conversation()
         self._generation = None
