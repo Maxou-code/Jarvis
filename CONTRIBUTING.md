@@ -1,6 +1,6 @@
 # Contribuer a JARVIS
 
-Les contributions externes sont acceptees uniquement sous forme de proposition
+Les contributions externes sont acceptées uniquement sous forme de proposition
 de modification au depot officiel.
 
 ## Methode
