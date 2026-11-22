@@ -1,0 +1,73 @@
+Licence JARVIS - Source disponible
+==================================
+
+Copyright (c) 2026 Maxou-code
+
+1. Objet
+
+Le present document accorde une licence a toute personne souhaitant utiliser
+et modifier le logiciel JARVIS. Il n'accorde aucun droit de redistribution,
+ni aucun droit de publier ou de mettre a disposition une copie du logiciel,
+avec ou sans modifications.
+
+2. Droits accordes
+
+Sous reserve du respect integral des conditions ci-dessous, le titulaire des
+droits autorise toute personne a :
+
+- installer et executer le logiciel pour son usage personnel ou professionnel ;
+- consulter le code source ;
+- modifier le code source pour son propre usage ;
+- creer des propositions de modification sous forme de pull request ou d'une
+  proposition de patch destinee au depot officiel.
+
+Cette licence n'autorise pas un usage qui dependrait de la redistribution du
+logiciel ou d'une partie substantielle de son code a des tiers.
+
+3. Restrictions
+
+Il est interdit, sans autorisation ecrite prealable du titulaire des droits,
+de :
+
+- redistribuer, publier, vendre, louer ou sous-louer le logiciel ;
+- mettre le logiciel ou une version modifiee a disposition de tiers, notamment
+  sous forme de depot public, fork public, archive, paquet, service heberge,
+  application embarquee, executable distribue ou image logicielle ;
+- transferer, accorder en sous-licence ou representer comme ouverte une copie
+  du logiciel ;
+- supprimer ou modifier les mentions de droit d'auteur ou cette licence.
+
+Le fait de proposer une pull request ne constitue pas une redistribution
+publique du logiciel. La pull request doit rester associee au depot officiel
+et ne doit pas etre utilisee pour publier une copie independante du projet.
+
+4. Contributions
+
+Toute personne qui soumet une contribution au depot officiel conserve la
+propriete des droits qu'elle detient sur sa contribution. En soumettant une
+contribution, elle accorde irrevocablement au titulaire des droits une licence
+perpetuelle, mondiale, gratuite et transferable lui permettant d'utiliser,
+reproduire, modifier, distribuer, sous-licencier et integrer cette contribution
+a JARVIS ou a des travaux derives.
+
+Une contribution ne doit pas contenir de code, de contenu ou d'informations
+pour lesquels le contributeur ne detient pas les droits necessaires.
+
+5. Absence de garantie
+
+Le logiciel est fourni "EN L'ETAT", sans garantie d'aucune sorte, explicite ou
+implicite, y compris les garanties de qualite marchande, d'adaptation a un usage
+particulier ou d'absence de contrefacon. En aucun cas le titulaire des droits ne
+pourra etre tenu responsable des dommages directs, indirects, particuliers,
+accessoires ou consecutifs resultant de l'utilisation ou de l'impossibilite
+d'utiliser le logiciel.
+
+6. Conditions des travaux derives
+
+Toute copie ou modification conservee uniquement dans un environnement prive
+peut rester sous les termes de cette licence. Toute mise a disposition a des tiers
+hors du depot officiel exige une autorisation ecrite prealable du titulaire des
+droits.
+
+Le depot officiel est considere comme la seule source autorisee pour publier
+des releases ou des versions integrees du logiciel.
