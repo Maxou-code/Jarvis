@@ -1,79 +1,95 @@
 # JARVIS
 
-**JARVIS** est un assistant IA de bureau pour Windows, construit avec Python et PyQt6. Il dialogue avec un modèle local via **Ollama**, conserve l'historique des conversations et peut utiliser des outils pour produire des calculs, manipuler des fichiers, rechercher sur le Web, afficher des graphiques, créer des pièces 3D ou agir sur l'interface Windows.
+**JARVIS** est un assistant IA de bureau pour Windows, développé en Python avec PyQt6. Il dialogue avec un modèle servi par **Ollama**, conserve les conversations localement et peut appeler des outils pour calculer, analyser des fichiers, produire des graphiques et des modèles 3D, rechercher sur le Web ou interagir avec le bureau.
+
+> JARVIS orchestre un modèle de langage et des outils locaux : il ne remplace ni un logiciel d'ingénierie spécialisé ni une validation humaine. Les résultats techniques dépendent des données, hypothèses, modèles et logiciels disponibles sur la machine.
 
 ![Interface générale de JARVIS](Images/Interface.png)
-
----
 
 ## Sommaire
 
 - [Fonctionnalités](#fonctionnalités)
+- [Mode ingénieur](#mode-ingénieur)
 - [Captures d'écran](#captures-décran)
-- [Architecture](#architecture)
 - [Prérequis](#prérequis)
 - [Installation](#installation)
-- [Configuration du modèle Ollama](#configuration-du-modèle-ollama)
-- [Lancement](#lancement)
+- [Configuration](#configuration)
+- [Démarrage](#démarrage)
 - [Utilisation](#utilisation)
-- [Données locales](#données-locales)
-- [Sécurité](#sécurité)
+- [Outils disponibles](#outils-disponibles)
+- [Données et confidentialité](#données-et-confidentialité)
+- [Sécurité et limites](#sécurité-et-limites)
+- [Architecture](#architecture)
 - [Dépannage](#dépannage)
-- [Structure du projet](#structure-du-projet)
-- [Contributions](#contributions)
-- [Licence](#licence)
+- [Développement et tests](#développement-et-tests)
+- [Structure du dépôt](#structure-du-dépôt)
+- [Contributions et licence](#contributions-et-licence)
 
 ## Fonctionnalités
 
-- **Conversation locale** avec streaming des réponses via l'API Ollama.
-- **Historique des conversations** dans une base SQLite, avec renommage, suppression et reprise.
-- **Affichage riche** de Markdown, tableaux, blocs de code colorés et fichiers joints.
-- **Calculs sécurisés**, date et heure locales.
-- **Recherche Web** DuckDuckGo lorsque une connexion Internet est disponible.
-- **Gestion de fichiers** dans un espace de travail dédié et dans les dossiers explicitement autorisés.
-- **Exécution Python contrôlée** avec accès limité au workspace, délai maximal et blocage des actions réseau, processus externes et suppressions.
-- **Base de connaissances persistante** avec recherche, création et consultation d'informations.
-- **Graphiques interactifs** en ligne ou en barres intégrés dans la conversation.
-- **Modélisation mécanique 3D** avec CadQuery, export STL et visualisation interactive PyVista.
-- **Contrôle Windows** : ouverture d'applications, capture d'écran, souris, clavier, défilement et notifications natives.
-- **Pièces jointes** : ajout, prévisualisation, ouverture ou téléchargement de fichiers depuis l'interface.
+- **Conversation avec Ollama** : réponses en streaming, réflexion facultative selon le modèle, appels d'outils et reprise des conversations précédentes.
+- **Interface de bureau** : historique, rendu Markdown et tableaux, blocs de code colorés, panneau d'aperçu et pièces jointes.
+- **Mode ingénieur** : instructions techniques à la demande, résolution de systèmes linéaires, simulation RK4 d'équations différentielles et rapports techniques Markdown.
+- **Calcul et visualisation** : calculatrice sécurisée, graphiques en ligne ou en barres, séries multiples et visualiseur 3D STL interactif.
+- **Outils Python et CAO** : exécution d'un script contrôlée par le runner existant et génération de modèles paramétriques avec CadQuery.
+- **Fichiers et mémoire** : espace de travail local, dossiers supplémentaires explicitement autorisés et base de connaissances persistante.
+- **Recherche Web** : résultats DuckDuckGo ; Bing ou Google peuvent être ajoutés avec leurs clés API.
+- **Automatisation Windows** : capture d'écran, fenêtres ouvertes, lancement d'applications, souris, clavier et notifications.
+- **Pièces jointes** : images, fichiers texte et certains documents peuvent être prévisualisés ou transmis au modèle sous forme d'image/texte selon leur format et les bibliothèques installées.
+
+Les capacités exactes dépendent du modèle Ollama choisi, de ses capacités d'appel d'outils, des dépendances installées et de la configuration de la machine.
+
+## Mode ingénieur
+
+Le bouton à icône d'engrenages dans la barre de saisie active le mode ingénieur pour la demande envoyée. L'état sélectionné est visible dans l'interface. Le bouton ajoute au prompt de cette requête des consignes pour :
+
+1. clarifier les données, unités, hypothèses et inconnues importantes ;
+2. choisir et combiner les outils techniques disponibles ;
+3. vérifier les résultats lorsque c'est possible et signaler explicitement un contrôle échoué ;
+4. distinguer les valeurs calculées, les hypothèses et les estimations ;
+5. inclure les limites et validations supplémentaires nécessaires.
+
+Le mode peut être défini actif ou inactif au démarrage dans `config.py` :
+
+```python
+ENGINEERING_MODE_DEFAULT = True   # Mode actif au lancement
+# ENGINEERING_MODE_DEFAULT = False  # Mode inactif au lancement
+```
+
+Le bouton reste modifiable dans l'interface. Le choix du bouton s'applique à la requête concernée ; il n'est pas enregistré comme préférence persistante entre les lancements.
+
+### Outils d'ingénierie intégrés
+
+| Outil | Fonctionnement et limites |
+|---|---|
+| `solve_linear_system` | Résout `Ax=b` pour une matrice carrée de 1 à 20 lignes avec pivot partiel et contrôle du résidu. |
+| `simulate_ode` | Intègre jusqu'à 8 équations différentielles du premier ordre avec RK4. Compare la solution à un calcul avec un pas deux fois plus fin ; signale si l'écart dépasse 1 %. |
+| `create_technical_report` | Génère un rapport Markdown dans `Jarvis_Workspace/reports/`, avec objectif, hypothèses, méthode, résultats, vérification et limites. |
+
+La simulation accepte des états `y0`, `y1`, etc., le temps `t` et des paramètres numériques. Son contrôle de convergence **n'est pas une validation physique**. Cette première version n'intègre pas de solveurs FEM/CFD, de simulation de circuits, de conception PCB, de cinématique robotique ou de calcul réglementaire. Elle ne produit pas non plus de rapport PDF.
+
+Le mode ingénieur peut également s'appuyer sur `calculate`, `run_python`, `plot_chart` et `create_3d_model`. Les outils Python et CAO restent soumis aux restrictions et limites décrites dans [Sécurité et limites](#sécurité-et-limites). Pour des exemples et précisions supplémentaires, voir [`Docs/engineering.md`](Docs/engineering.md).
 
 ## Captures d'écran
 
 | Interface | Fonctionnalité |
 |---|---|
-| ![Interface générale](Images/Interface.png) | Interface de conversation et historique |
+| ![Interface générale](Images/Interface.png) | Conversation et historique |
 | ![Graphique](Images/Graphe.png) | Graphiques intégrés à la conversation |
-| ![Modèle 3D](Images/Modele3D.png) | Visualisation interactive d'une pièce 3D |
-
-## Architecture
-
-| Couche | Rôle |
-|---|---|
-| `main.py` | Point d'entrée de l'application et initialisation de PyQt6 |
-| `config.py` | Modèle Ollama, URL API, limites et chemins locaux |
-| `Core/agent.py` | Dialogue streaming, appels d'outils, historique et gestion des erreurs |
-| `Core/dispatcher.py` | Validation et exécution centralisée des outils |
-| `Core/conversations.py` | Persistance SQLite des conversations |
-| `Core/paths.py` | Résolution des chemins autorisés et protection contre les sorties du workspace |
-| `Tools/` | Calcul, Web, fichiers, Python, connaissances, graphiques, CadQuery, écran et Windows |
-| `UI/` | Fenêtre principale, rendu Markdown, visualiseur 3D, graphiques et worker asynchrone |
-
-Le client envoie les messages à `http://localhost:11434/api/chat` avec le streaming activé. L'application utilise les réponses structurées d'Ollama pour demander des outils, puis incorpore leurs résultats dans la conversation.
+| ![Modèle 3D](Images/Modele3D.png) | Visualisation interactive d'un modèle 3D |
 
 ## Prérequis
 
-- **Windows**
-- **Python 3** avec `pip`
-- **Ollama** installé et démarré
-- Un modèle compatible avec les **appels d'outils / tool calling**
-- Une connexion Internet uniquement pour la recherche Web
+- Windows et Python 3 avec `pip`.
+- [Ollama](https://ollama.com/) installé et démarré.
+- Un modèle Ollama compatible avec le format de conversation et les appels d'outils utilisés par l'application.
+- Une connexion Internet seulement pour la recherche Web et les téléchargements.
 
-CadQuery, PyVista et les bibliothèques de lecture de documents sont optionnelles selon les fonctionnalités utilisées.
+CadQuery, PyVista et les lecteurs PDF, Word et Excel sont optionnels. Les outils qui les utilisent ne fonctionneront pas si leur dépendance correspondante est absente.
 
 ## Installation
 
-Depuis une invite PowerShell ouverte à la racine du dépôt :
+Depuis PowerShell, à la racine du dépôt :
 
 ```powershell
 py -m venv .venv
@@ -82,199 +98,249 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Si l'exécution de scripts PowerShell est bloquée par la stratégie Windows :
+Si l'exécution des scripts PowerShell est bloquée, autorisez-les uniquement pour la session en cours, puis activez l'environnement :
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-La liste complète des dépendances est disponible dans [`requirements.txt`](requirements.txt).
+Les dépendances déclarées sont dans [`requirements.txt`](requirements.txt). Les fonctions facultatives comprennent notamment :
 
-### Dépendances principales
-
-| Package | Fonction |
+| Paquets | Usage |
 |---|---|
-| `PyQt6`, `PyQt6-WebEngine` | Interface de bureau et rendu riche |
-| `requests` | Communication avec Ollama |
-| `markdown-it-py`, `Pygments` | Markdown et coloration syntaxique |
-| `PyAutoGUI`, `mss`, `Pillow` | Capture d'écran et contrôle souris/clavier |
-| `winotify` | Notifications Windows |
-| `cadquery` | Construction paramétrique de pièces 3D |
-| `pyvista` | Visualisation interactive des modèles STL |
+| `cadquery` | Construction et export STL des modèles paramétriques |
+| `pyvista` | Visualisation 3D interactive |
+| `pypdf` | Extraction du texte des PDF |
+| `python-docx` | Extraction du texte des documents DOCX |
+| `openpyxl` | Extraction des feuilles des classeurs XLSX |
 | `ddgs` | Recherche DuckDuckGo |
-| `pyperclip` | Presse-papiers |
-| `pypdf`, `python-docx`, `openpyxl` | Lecture PDF, Word et Excel |
+| `pyperclip` | Fonctions liées au presse-papiers |
 
-## Configuration du modèle Ollama
+## Configuration
 
-Le modèle par défaut est configuré dans [`config.py`](config.py) :
+Les réglages principaux se trouvent dans [`config.py`](config.py) :
 
 ```python
 MODEL = "Jarvis-3.5"
 URL = "http://localhost:11434/api/chat"
+ENGINEERING_MODE_DEFAULT = True
 ```
 
-Deux Modelfiles sont fournis :
+- `MODEL` doit correspondre exactement à un modèle disponible dans Ollama.
+- `URL` pointe vers l'API de chat Ollama.
+- `ENGINEERING_MODE_DEFAULT` choisit l'état initial du bouton ingénieur.
+- Les constantes de limites (durée Python, taille des fichiers et historique) sont également définies dans ce fichier.
 
-- [`Jarvis-3.5`](Jarvis-3.5) — modèle basé sur `qwen3.5:9b`
-- [`Jarvis-3.8`](Jarvis-3.8) — modèle basé sur `qwen3.8:27b`
+Le modèle par défaut est défini dans `config.py`. Deux Modelfiles sont fournis :
 
-Créez-les depuis Ollama :
+- [`Jarvis-3.5`](Jarvis-3.5), basé sur `qwen3.5:9b`.
+- [`Jarvis-3.8`](Jarvis-3.8), basé sur `qwen3.8:27b`.
+
+Créez le modèle choisi depuis la racine du dépôt, après avoir installé Ollama et téléchargé son modèle de base :
 
 ```powershell
+ollama pull qwen3.5:9b
 ollama create Jarvis-3.5 -f .\Jarvis-3.5
-ollama create Jarvis-3.8 -f .\Jarvis-3.8
-```
-
-Vérifiez les modèles installés :
-
-```powershell
 ollama list
 ```
 
-Pour utiliser un autre modèle local, modifiez `MODEL` dans `config.py`. Le nom doit correspondre exactement à celui reconnu par Ollama. Pour utiliser un serveur Ollama distant, adaptez également `URL`.
+Pour créer l'autre variante, récupérez d'abord sa base (`qwen3.8:27b`), puis utilisez `ollama create Jarvis-3.8 -f .\Jarvis-3.8` et changez `MODEL` dans `config.py`.
 
-## Lancement
+La recherche Web utilise DuckDuckGo si `ddgs` est installé. Des clés API peuvent activer en plus Bing (`BING_SEARCH_API_KEY`) ou Google (`GOOGLE_SEARCH_API_KEY` et `GOOGLE_SEARCH_ENGINE_ID`). Configurez-les dans l'environnement du processus plutôt que de les inscrire dans le dépôt.
 
-Avec Ollama démarré, lancez l'application depuis l'environnement virtuel :
+## Démarrage
+
+Démarrez Ollama, vérifiez que le modèle configuré est disponible, puis lancez depuis la racine du projet :
 
 ```powershell
+ollama list
 python main.py
 ```
 
-L'application s'ouvre en plein écran. Une fenêtre peut être redimensionnée normalement depuis Windows.
+L'interface s'ouvre dans une fenêtre maximisée. Elle peut être redimensionnée normalement.
 
 ## Utilisation
 
-Dans la barre latérale, utilisez **nouvelle conversation** pour démarrer une session ou sélectionnez une conversation précédente. Le bouton d'arrêt permet d'interrompre la génération en cours.
+1. Démarrez une nouvelle conversation depuis la barre latérale ou reprenez une conversation existante.
+2. Saisissez une demande ; **Entrée** l'envoie et **Maj+Entrée** ajoute une nouvelle ligne.
+3. Utilisez le trombone pour joindre des fichiers. Les pièces jointes prises en charge peuvent être prévisualisées depuis l'interface.
+4. Activez le bouton engrenages pour ajouter les consignes du mode ingénieur à cette demande. Le bouton cerveau contrôle séparément la réflexion du modèle lorsque celui-ci la prend en charge.
+5. Utilisez le bouton d'arrêt pour interrompre une génération en cours.
 
-Exemples de demandes :
+Exemples :
 
-- « Quelle heure est-il ? Calcule 15 % de 248. »
+- « Calcule 15 % de 248 et explique les étapes. »
+- « Résous le système 3x + 2y = 5 et x + 2y = 5. »
+- « En mode ingénieur, simule `dy/dt = y`, avec `y(0)=1` sur `[0, 1]`, puis compare à `e`. »
+- « Génère un rapport technique Markdown qui documente les hypothèses, les résultats et les limites de cette étude. »
 - « Crée un graphique en ligne des ventes mensuelles 12, 18, 15, 24. »
-- « Recherche les nouveautés Python les plus récentes. »
 - « Crée une pièce rectangulaire de 40 × 30 × 8 mm percée au centre. »
+- « Recherche les nouveautés Python les plus récentes. »
 - « Mémorise que mon projet principal s'appelle Atlas. »
-- « Liste les fenêtres ouvertes, puis ouvre Visual Studio Code. »
+- « Liste les fenêtres ouvertes. »
 
-Vous pouvez joindre des fichiers avec le bouton trombone. Les images peuvent être envoyées au modèle lorsqu'elles sont prises en charge par celui-ci.
+### Pièces jointes
 
-### Outils disponibles
+L'application peut extraire du texte depuis des fichiers texte courants (`.txt`, `.md`, `.py`, `.json`, `.csv`, `.xml`, `.html`, `.css`, `.js`, `.log`, `.yaml`, `.yml`, `.ini`), ainsi que depuis les PDF, DOCX et XLSX si les bibliothèques optionnelles correspondantes sont installées. Les images courantes peuvent être envoyées comme images si le modèle les accepte. Pour les autres formats, l'application joint le fichier à la conversation, mais n'en extrait pas automatiquement le contenu.
 
-| Catégorie | Outils |
+## Outils disponibles
+
+Les outils sont proposés au modèle par appel de fonction. Le modèle décide lesquels utiliser selon la demande ; leur présence ne garantit pas que chaque modèle les appellera correctement.
+
+| Domaine | Outils |
 |---|---|
-| Temps et calcul | `get_current_datetime`, `calculate` |
-| Recherche | `web_search` |
+| Date et calcul | `get_current_datetime`, `calculate` |
+| Ingénierie numérique | `solve_linear_system`, `simulate_ode` |
+| Rapports | `create_technical_report` (Markdown) |
+| Recherche Web | `web_search` |
 | Python | `run_python`, `list_python_packages` |
-| Fichiers | `create_file`, `create_folder`, `read_file`, `write_file`, `open_file`, `open_workspace` |
+| Fichiers du workspace | `create_file`, `create_folder`, `read_file`, `write_file`, `open_file`, `open_workspace` |
 | Dossiers autorisés | `list_managed_files`, `read_managed_file`, `write_managed_file` |
 | Sauvegardes | `backup_config`, `restore_config` |
 | Mémoire | `knowledge_save`, `knowledge_search`, `knowledge_list` |
-| Visualisation | `plot_chart`, `create_3d_model`, `read_cadquery_guide` |
-| Bureau | `capture_screen`, `get_open_windows`, `open_app` |
-| Souris | `move_mouse`, `click_mouse`, `mouse_down`, `mouse_up`, `drag_mouse`, `scroll_mouse` |
-| Clavier | `type_text`, `press_key`, `hotkey` |
-| Notifications | `notify_user` |
+| Graphiques et CAO | `plot_chart`, `create_3d_model`, `read_cadquery_guide` |
+| Bureau Windows | `capture_screen`, `get_open_windows`, `open_app` |
+| Souris | `move_mouse`, `click_mouse`, `mouse_down`, `mouse_up`, `drag_mouse`, `scroll_mouse`, `release_all_mouse_buttons` |
+| Clavier et notifications | `type_text`, `press_key`, `hotkey`, `notify_user` |
 
-Le guide complet CadQuery est disponible dans [`Docs/cadquery.md`](Docs/cadquery.md).
+Les graphiques natifs prennent en charge les lignes et les barres, avec plusieurs séries. La modélisation CAO produit des STL dans le workspace ; l'export et la visualisation dépendent des bibliothèques optionnelles. Voir le guide [`Docs/cadquery.md`](Docs/cadquery.md).
 
-## Données locales
+## Données et confidentialité
 
-Jarvis crée automatiquement `%USERPROFILE%\Jarvis_Workspace` et y conserve :
+Par défaut, JARVIS crée `%USERPROFILE%\Jarvis_Workspace` et y stocke ses données :
 
-| Élément | Emplacement |
+| Données | Emplacement |
 |---|---|
-| Conversations | `conversations.sqlite3` |
-| Connaissances | `jarvis_knowledge.sqlite3` |
+| Conversations et historique | `conversations.sqlite3` |
+| Base de connaissances | `jarvis_knowledge.sqlite3` |
 | Configuration des dossiers autorisés | `jarvis_config.json` |
 | Sauvegardes | `backups/` |
-| Modèles 3D | `models/*.stl` |
-| Scripts temporaires | `.jarvis_script_*.py`, `.jarvis_runner_*.py` |
+| Modèles 3D exportés | `models/*.stl` |
+| Rapports techniques | `reports/*.md` |
+| Scripts temporaires du runner | `.jarvis_script_*.py`, `.jarvis_runner_*.py` |
 
-Les dossiers Windows standards sont exposés avec les alias `workspace/`, `documents/`, `downloads/` et `desktop/`. Vous pouvez aussi autoriser un autre dossier depuis l'interface avec le bouton d'ajout de dossier.
+Les dossiers standards accessibles par les outils gérés sont `workspace/`, `documents/`, `downloads/` et `desktop/`. Des dossiers supplémentaires peuvent être autorisés depuis l'interface ; leur autorisation est conservée dans la configuration locale.
 
-Les échanges avec Ollama restent locaux lorsqu'un modèle Ollama local est utilisé. Les recherches Web utilisent Internet. Les données stockées ne sont pas chiffrées sur disque ; évitez d'y enregistrer des mots de passe, clés API ou informations sensibles.
+Avec Ollama local, les conversations et les appels au modèle restent sur l'ordinateur, sous réserve de la configuration du serveur Ollama. La recherche Web contacte des services Internet ; les résultats obtenus sont renvoyés au modèle. Les données locales ne sont pas chiffrées par JARVIS. Ne stockez pas de mots de passe, clés API ou autres secrets dans les conversations, les fichiers de configuration ou la base de connaissances.
 
-## Sécurité
+## Sécurité et limites
 
-JARVIS est un agent capable d'interagir avec votre bureau. Utilisez-le avec précaution :
+JARVIS peut lire et écrire des fichiers, lancer des applications et agir sur le bureau. N'accordez l'accès qu'aux dossiers nécessaires et vérifiez les actions avant de lui confier un travail sensible.
 
-- Les opérations sont limitées au workspace et aux dossiers explicitement autorisés.
-- Les chemins absolus et les remontées `..` sont bloqués pour les opérations gérées.
-- L'exécution Python ne doit pas être considérée comme une sandbox inviolable.
-- Les suppressions, processus externes et accès réseau sont bloqués dans le runner Python.
-- Une confirmation est demandée ou doit être donnée pour les actions sensibles.
-- Vérifiez les scripts générés avant toute utilisation liée à des données ou systèmes critiques.
+- Les chemins des outils de fichiers sont résolus dans le workspace ou un dossier explicitement autorisé ; les chemins absolus et les remontées `..` ne sont pas acceptés par les outils gérés.
+- Le runner Python applique des restrictions pratiques sur les écritures, suppressions, accès réseau et processus externes, et impose une durée maximale. **Ce n'est pas une sandbox de sécurité inviolable** : n'exécutez pas de scripts générés sur des systèmes ou données critiques sans revue.
+- Les scripts CadQuery passent par ce runner et sont limités en taille et en durée ; les modèles générés doivent être inspectés avant fabrication ou utilisation.
+- Les outils de souris et de clavier agissent sur la session Windows active. Les actions peuvent produire des effets réels ; demandez à JARVIS de solliciter une confirmation avant une action conséquente et surveillez l'exécution.
+- Les limites du mode ingénieur sont numériques et informatives. Une convergence numérique ne prouve ni l'exactitude du modèle ni la sécurité d'une conception.
+- Les pages Web, documents et autres contenus externes sont des données à analyser, pas des instructions fiables.
 
-Ne partagez pas les fichiers `%USERPROFILE%\Jarvis_Workspace\jarvis_config.json`, les bases SQLite ni vos pièces jointes lorsqu'ils peuvent contenir des données privées.
+Cette application n'est pas destinée à certifier une conception ou à remplacer un professionnel qualifié, une simulation métier validée ou des essais physiques.
+
+## Architecture
+
+| Couche | Responsabilité |
+|---|---|
+| `main.py` | Initialisation DPI et lancement de l'application PyQt |
+| `config.py` | Modèle, URL, workspace, limites et état par défaut du mode ingénieur |
+| `prompts.py` | Instructions générales et instructions additionnelles du mode ingénieur |
+| `Core/agent.py` | Historique, requêtes Ollama en streaming, appels d'outils et reprise |
+| `Core/dispatcher.py` | Registre et exécution des outils |
+| `Core/conversations.py` | Persistance SQLite des conversations |
+| `Core/paths.py` | Résolution du workspace et des dossiers autorisés |
+| `Tools/` | Calcul, ingénierie, Python, CAO, graphiques, fichiers, recherche et contrôle Windows |
+| `UI/` | Fenêtre principale, worker asynchrone, rendu Markdown, graphiques, aperçus et visualiseur 3D |
+| `Docs/` | Guides CadQuery et mode ingénieur |
+
+L'application envoie des requêtes à l'API Ollama configurée avec le streaming activé. Les réponses d'outil sont exécutées par le dispatcher et leurs résultats sont ajoutés au contexte de la conversation.
 
 ## Dépannage
 
 ### Ollama ne répond pas
 
-Vérifiez qu'Ollama est démarré puis testez la connexion :
-
-```powershell
-curl http://localhost:11434/api/tags
-```
-
-Si le serveur utilise une autre adresse ou un autre port, adaptez `URL` dans [`config.py`](config.py).
-
-### Le modèle configuré est introuvable
+Vérifiez qu'Ollama est lancé et écoute à l'adresse configurée :
 
 ```powershell
 ollama list
+curl http://localhost:11434/api/tags
+```
+
+Si le serveur est hébergé ailleurs, modifiez `URL` dans `config.py`. Vérifiez aussi qu'un pare-feu ou une autre configuration réseau ne bloque pas la connexion.
+
+### Modèle introuvable ou appels d'outils indisponibles
+
+Comparez `MODEL` dans `config.py` aux noms affichés par `ollama list`. Vérifiez que le modèle a été créé et qu'il prend en charge les appels d'outils utilisés par l'application. Exemple de création :
+
+```powershell
+ollama pull qwen3.5:9b
 ollama create Jarvis-3.5 -f .\Jarvis-3.5
 ```
 
-Assurez-vous que la valeur `MODEL` correspond exactement au nom Ollama.
+### Une bibliothèque ou une fonction facultative manque
 
-### Une bibliothèque est absente
-
-Réinstallez les dépendances dans l'environnement actif :
+Activez l'environnement virtuel du projet, puis réinstallez les dépendances :
 
 ```powershell
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
-Pour installer uniquement CadQuery et PyVista :
-
-```powershell
-python -m pip install cadquery pyvista
-```
+CadQuery, PyVista et les lecteurs de documents sont optionnels ; installez seulement le paquet nécessaire si son outil est requis.
 
 ### La recherche Web échoue
 
-La recherche nécessite une connexion Internet active. Si l'ordinateur est hors ligne, JARVIS devra interrompre cette recherche plutôt que d'inventer des résultats.
+Vérifiez l'accès Internet et la présence de `ddgs`. Les clés Bing et Google sont facultatives. Si le PC est hors ligne ou si aucun moteur ne renvoie de résultat, JARVIS ne peut pas effectuer la recherche.
 
-### Une fenêtre ou une application n'est pas détectée
+### Les PDF, documents ou images ne sont pas analysés
 
-Fermez les applications obsolètes, capturez à nouveau l'écran et vérifiez le nom exact de la fenêtre ou de l'application dans Windows.
+Installez la dépendance de lecture correspondant au format (`pypdf`, `python-docx` ou `openpyxl`). Pour les images, vérifiez que le modèle choisi prend en charge l'entrée visuelle.
 
-## Structure du projet
+### Le modèle 3D ou son aperçu ne s'affiche pas
+
+Vérifiez que `cadquery` est installé pour générer le STL et `pyvista` pour l'affichage interactif. Les erreurs et fichiers produits sont dans le workspace, sous `models/`.
+
+### JARVIS ne détecte pas une fenêtre
+
+Vérifiez que la fenêtre est visible et réessayez avec son titre ou le nom exact de l'application. Les coordonnées d'action doivent correspondre à une capture d'écran récente.
+
+## Développement et tests
+
+Les tests unitaires présents pour les outils d'ingénierie se lancent depuis la racine avec l'environnement du projet :
+
+```powershell
+python -m unittest Tests.test_engineering -v
+```
+
+Pour vérifier la syntaxe des modules principaux :
+
+```powershell
+python -m py_compile Tools\engineering.py Tools\schemas.py Core\dispatcher.py Core\agent.py UI\worker.py UI\main_window.py
+```
+
+## Structure du dépôt
 
 ```text
 Jarvis2.0/
-├── main.py                 # Point d'entrée
-├── config.py               # Configuration centrale
-├── requirements.txt        # Dépendances Python
-├── Jarvis-3.5             # Modelfile Ollama léger
-├── Jarvis-3.8             # Modelfile Ollama étendu
-├── Core/                   # Agent, dispatcher, chemins et conversations
-├── Tools/                  # Outils exécutables par le modèle
-├── UI/                     # Interface PyQt6 et composants graphiques
-├── Docs/cadquery.md        # Référence CadQuery
-├── Images/                 # Captures utilisées dans la documentation
-└── Icons/                  # Icônes SVG de l'interface
+├── main.py
+├── config.py
+├── prompts.py
+├── requirements.txt
+├── Jarvis-3.5                 # Modelfile Ollama
+├── Jarvis-3.8                 # Modelfile Ollama
+├── Core/                      # Agent, conversations, dispatcher, chemins
+├── Tools/                     # Outils exécutables par le modèle
+├── UI/                        # Interface et composants visuels
+├── Docs/
+│   ├── cadquery.md
+│   └── engineering.md
+├── Tests/
+│   └── test_engineering.py
+├── Images/                    # Captures d'écran
+└── Icons/                     # Icônes de l'interface
 ```
 
-## Contributions
+## Contributions et licence
 
-Les propositions de modification sont acceptées uniquement via pull request sur le dépôt officiel. Avant de contribuer, consultez [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Consultez [`CONTRIBUTING.md`](CONTRIBUTING.md) avant de proposer une modification. Les contributions au projet se font par pull request sur le dépôt officiel.
 
-## Licence
-
-JARVIS est distribué sous la [Licence JARVIS - Source disponible](LICENSE).
-
-Cette licence autorise l'utilisation personnelle ou professionnelle, la consultation du code et sa modification privée. Elle **n'autorise pas la redistribution** du logiciel ou d'une version modifiée. Les modifications doivent être proposées au projet officiel sous forme de **pull request**.
+JARVIS est distribué sous la [Licence JARVIS - Source disponible](LICENSE). Consultez le fichier `LICENSE` pour connaître les droits d'utilisation, de modification et de redistribution.

@@ -80,6 +80,7 @@ except ImportError:
 from config import (
     CONTENT_MAX_WIDTH,
     CONTENT_SIDE_MARGIN,
+    ENGINEERING_MODE_DEFAULT,
     ENTRY_MAX_WIDTH,
     MAX_ERROR_DETAILS,
     MODEL,
@@ -296,6 +297,28 @@ class JarvisWindow(QMainWindow):
                 border-color: #7CEEFF;
             }
             QPushButton#reflectionToggle:checked:hover {
+                background: #38DDFB;
+                border-color: #C0FAFF;
+            }
+
+            QPushButton#engineeringToggle {
+                background: #102B38;
+                color: #55717D;
+                border: 1px solid #145064;
+                border-radius: 4px;
+                min-width: 42px;
+                min-height: 42px;
+            }
+            QPushButton#engineeringToggle:hover {
+                background: #103746;
+                border-color: #20A9C8;
+            }
+            QPushButton#engineeringToggle:checked {
+                background: #00AFCF;
+                color: #031018;
+                border-color: #7CEEFF;
+            }
+            QPushButton#engineeringToggle:checked:hover {
                 background: #38DDFB;
                 border-color: #C0FAFF;
             }
@@ -568,6 +591,27 @@ class JarvisWindow(QMainWindow):
             )
         )
         composer_layout.addWidget(self.reflection_button)
+
+        self.engineering_button = QPushButton()
+        self.engineering_button.setIcon(QIcon("Icons/gears-solid-full.svg"))
+        self.engineering_button.setIconSize(QSize(22, 22))
+        self.engineering_button.setObjectName("engineeringToggle")
+        self.engineering_button.setCheckable(True)
+        self.engineering_button.setChecked(ENGINEERING_MODE_DEFAULT)
+        self.engineering_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.engineering_button.toggled.connect(
+            lambda enabled: self.engineering_button.setToolTip(
+                "Désactiver le mode ingénieur"
+                if enabled else
+                "Activer le mode ingénieur"
+            )
+        )
+        self.engineering_button.setToolTip(
+            "Désactiver le mode ingénieur"
+            if self.engineering_button.isChecked()
+            else "Activer le mode ingénieur"
+        )
+        composer_layout.addWidget(self.engineering_button)
 
         self.send_button = QPushButton()
         self.send_button.setIcon(QIcon("Icons/paper-plane-regular-full.svg"))
@@ -1355,6 +1399,7 @@ class JarvisWindow(QMainWindow):
             conversation["id"],
             images,
             think_enabled=self.reflection_button.isChecked(),
+            engineering_mode=self.engineering_button.isChecked(),
         )
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)

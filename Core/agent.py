@@ -6,7 +6,7 @@ import requests
 
 from config import (MAX_ERROR_DETAILS, MAX_HISTORY_MESSAGES, MAX_RECOVERY_ATTEMPTS,
                     MAX_TOOL_ROUNDS, MODEL, REQUEST_TIMEOUT, THINK_ENABLED, URL)
-from prompts import SYSTEM_PROMPT
+from prompts import ENGINEERING_MODE_PROMPT, SYSTEM_PROMPT
 from Core.dispatcher import execute_tool, normalize_tool_arguments
 from Tools.schemas import tools
 from Tools.screen import capture_screen
@@ -75,6 +75,7 @@ def ensure_system_prompt():
 def stream_chat(
     on_token=None, on_thinking=None, on_tool=None, on_response_start=None,
     think_enabled=THINK_ENABLED, cancel_event=None, on_stream_response=None,
+    engineering_mode=False,
 ):
     """
     Streaming Ollama robuste pour JARVIS.
@@ -82,9 +83,15 @@ def stream_chat(
     Fournit des diagnostics détaillés en cas d'erreur HTTP ou JSON.
     """
 
+    request_messages = [dict(message) for message in messages]
+    if engineering_mode:
+        request_messages[0]["content"] = (
+            request_messages[0]["content"] + "\n\n" + ENGINEERING_MODE_PROMPT.strip()
+        )
+
     payload = {
         "model": MODEL,
-        "messages": messages,
+        "messages": request_messages,
         "Tools": tools,
         "stream": True,
         "think": think_enabled
@@ -272,7 +279,7 @@ def trim_history():
         messages = [messages[0]] + messages[-MAX_HISTORY_MESSAGES:]
 def ask_jarvis(
     user_input, user_images=None, callbacks=None, think_enabled=THINK_ENABLED,
-    cancel_event=None,
+    cancel_event=None, engineering_mode=False,
 ):
     callbacks = callbacks or {}
     if cancel_event is not None and cancel_event.is_set():
@@ -302,6 +309,7 @@ def ask_jarvis(
                 think_enabled=think_enabled,
                 cancel_event=cancel_event,
                 on_stream_response=callbacks.get("on_stream_response"),
+                engineering_mode=engineering_mode,
             )
             if cancel_event is not None and cancel_event.is_set():
                 return

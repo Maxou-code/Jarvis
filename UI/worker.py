@@ -15,13 +15,15 @@ class AgentWorker(QObject):
     failed = pyqtSignal(str, str)
 
     def __init__(
-        self, prompt, conversation_id, images=None, think_enabled=THINK_ENABLED
+        self, prompt, conversation_id, images=None, think_enabled=THINK_ENABLED,
+        engineering_mode=False,
     ):
         super().__init__()
         self.prompt = prompt
         self.conversation_id = conversation_id
         self.images = images or []
         self.think_enabled = think_enabled
+        self.engineering_mode = engineering_mode
         self._cancel_event = Event()
         self._response_lock = Lock()
         self._active_response = None
@@ -55,6 +57,7 @@ class AgentWorker(QObject):
                 callbacks=callbacks,
                 think_enabled=self.think_enabled,
                 cancel_event=self._cancel_event,
+                engineering_mode=self.engineering_mode,
             )
             self.finished.emit(self.conversation_id)
         except Exception as exc:

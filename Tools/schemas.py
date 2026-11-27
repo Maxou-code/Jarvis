@@ -33,6 +33,74 @@ tools = [
         ["expression"]
     ),
     make_tool(
+        "solve_linear_system",
+        "Résout un système linéaire Ax=b avec pivot partiel et vérifie le résidu. "
+        "La matrice doit être carrée, de taille 1 à 20.",
+        {
+            "matrix": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Ligne de la matrice A.",
+                },
+                "description": "Matrice carrée A.",
+            },
+            "vector": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": "Second membre b.",
+            },
+        },
+        ["matrix", "vector"],
+    ),
+    make_tool(
+        "simulate_ode",
+        "Simule un système d'équations différentielles du premier ordre avec RK4, "
+        "puis compare la solution avec un pas deux fois plus fin. Variables autorisées : "
+        "t, y0, y1... ; fonctions : sin, cos, tan, exp, log, log10, sqrt, abs, min, max ; "
+        "constantes : pi, e.",
+        {
+            "equations": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Expressions des dérivées dy_i/dt, une par état.",
+            },
+            "initial_values": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": "Valeurs initiales de y0, y1, etc.",
+            },
+            "t_start": {"type": "number", "description": "Début de l'intervalle."},
+            "t_end": {"type": "number", "description": "Fin de l'intervalle."},
+            "steps": {
+                "type": "integer",
+                "description": "Nombre de pas, de 2 à 5000 (défaut 100).",
+            },
+            "parameters": {
+                "type": "object",
+                "description": "Constantes numériques facultatives référencées par leur nom.",
+                "additionalProperties": {"type": "number"},
+            },
+        },
+        ["equations", "initial_values", "t_start", "t_end"],
+    ),
+    make_tool(
+        "create_technical_report",
+        "Génère un rapport technique Markdown non destructif dans workspace/reports, "
+        "avec objectif, hypothèses, méthode, résultats, vérification et limites.",
+        {
+            "title": string_prop("Titre du rapport."),
+            "objective": string_prop("Objectif de l'étude."),
+            "assumptions": string_prop("Hypothèses et unités utilisées."),
+            "method": string_prop("Méthode, équations et paramètres."),
+            "results": string_prop("Résultats obtenus."),
+            "verification": string_prop("Contrôles effectués et leur statut."),
+            "limitations": string_prop("Limites et validations restantes."),
+        },
+        ["title", "objective", "assumptions", "method", "results", "verification", "limitations"],
+    ),
+    make_tool(
         "web_search",
         "Recherche des informations sur Internet avec DuckDuckGo. "
         "N'est utilisable que si le PC dispose d'une connexion Internet active. "

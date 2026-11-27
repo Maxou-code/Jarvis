@@ -9,6 +9,11 @@ from Tools.charts import plot_chart
 from Tools.files import (backup_config, create_file, create_folder, list_managed_files,
                          open_file, open_workspace, read_file, read_managed_file,
                          restore_config, write_file, write_managed_file)
+from Tools.engineering import (
+    create_technical_report,
+    simulate_ode,
+    solve_linear_system,
+)
 from Tools.keyboard import hotkey, press_key, type_text
 from Tools.knowledge import knowledge_list, knowledge_save, knowledge_search
 from Tools.mouse import (click_mouse, drag_mouse, move_mouse, mouse_down, mouse_up,
@@ -21,6 +26,9 @@ from Tools.web import web_search
 FUNCTIONS = {
     "get_current_datetime": get_current_datetime,
     "calculate": calculate,
+    "solve_linear_system": solve_linear_system,
+    "simulate_ode": simulate_ode,
+    "create_technical_report": create_technical_report,
     "web_search": web_search,
     "run_python": run_python,
     "list_python_packages": list_python_packages,
