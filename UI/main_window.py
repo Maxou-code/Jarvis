@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QScrollArea, QFrame,
     QSizePolicy, QFileDialog, QListWidget, QListWidgetItem,
-    QMessageBox, QDialog, QDialogButtonBox, QGridLayout, QInputDialog, QMenu,
+    QMessageBox, QDialog, QGridLayout, QInputDialog, QMenu,
     QGraphicsDropShadowEffect, QSplitter
 )
 
@@ -88,6 +88,10 @@ from config import (
 from Core.agent import set_conversation_history
 from Core.conversations import ConversationStore
 from Core.paths import register_authorized_directory
+from UI.attachment_preview import (
+    IMAGE_EXTENSIONS, TEXT_EXTENSIONS, create_attachment_button,
+    extract_attachment_text, open_attachment_preview,
+)
 from UI.markdown_view import MarkdownWebView, render_markdown
 from UI.preview_panel import PreviewPanel
 from UI.widgets import MarkdownMessage, tool_details_to_markdown
@@ -848,7 +852,9 @@ class JarvisWindow(QMainWindow):
         role = message.get("role")
         if role == "user":
             self.current_assistant_bubble = None
-            self.add_message(message["content"], "user")
+            bubble = self.add_message(message["content"], "user")
+            if message.get("attachments"):
+                bubble.add_attachments(message["attachments"])
         elif role == "assistant":
             self.ensure_assistant_bubble().add_markdown_block(message["content"])
         elif role == "thinking":
@@ -1092,9 +1098,7 @@ class JarvisWindow(QMainWindow):
         bar.setValue(bar.maximum())
 
     def _is_image_attachment(self, path):
-        return Path(path).suffix.lower() in {
-            ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"
-        }
+        return Path(path).suffix.lower() in IMAGE_EXTENSIONS
 
     def _format_file_size(self, size):
         if size < 1024:
@@ -1129,7 +1133,7 @@ class JarvisWindow(QMainWindow):
                 QPushButton {
                     background: #0D2A37; color: #C9D7E8;
                     border: 1px solid #176078; border-radius: 6px;
-                    padding: 4px 7px; min-width: 22px; max-width: 28px;
+                    padding: 4px;
                 }
                 QPushButton:hover { background: #145064; color: white; }
                 QPushButton#removeAttachment {
@@ -1172,23 +1176,27 @@ class JarvisWindow(QMainWindow):
             info.addWidget(size_label)
             row.addLayout(info, 1)
 
-            preview_button = QPushButton("Voir" if self._is_image_attachment(path) else "Ouvrir")
-            preview_button.setToolTip("Afficher l'image" if self._is_image_attachment(path) else "Ouvrir avec l'application par défaut")
+            preview_button = create_attachment_button(
+                "Icons/arrow-up-right-from-square-solid-full.svg",
+                "Ouvrir en grand",
+            )
             preview_button.clicked.connect(
                 lambda checked=False, i=index: self.preview_attachment(i)
-                if self._is_image_attachment(self.attachments[i]["path"])
-                else self.open_attachment(i)
             )
             row.addWidget(preview_button)
 
-            download_button = QPushButton("↓")
-            download_button.setToolTip("Enregistrer une copie dans un autre dossier")
+            download_button = create_attachment_button(
+                "Icons/download-solid-full.svg",
+                "Enregistrer une copie dans un autre dossier",
+            )
             download_button.clicked.connect(lambda checked=False, i=index: self.download_attachment(i))
             row.addWidget(download_button)
 
-            remove_button = QPushButton("×")
+            remove_button = create_attachment_button(
+                "Icons/xmark-solid-full.svg",
+                "Retirer ce fichier de la liste des pièces jointes",
+            )
             remove_button.setObjectName("removeAttachment")
-            remove_button.setToolTip("Retirer ce fichier de la liste des pièces jointes")
             remove_button.clicked.connect(lambda checked=False, i=index: self.remove_attachment(i))
             row.addWidget(remove_button)
 
@@ -1220,38 +1228,7 @@ class JarvisWindow(QMainWindow):
     def preview_attachment(self, index):
         if not 0 <= index < len(self.attachments):
             return
-        path = Path(self.attachments[index]["path"])
-        if not path.is_file():
-            QMessageBox.warning(self, "Aperçu impossible", "Le fichier n'existe plus à cet emplacement.")
-            return
-        pixmap = QPixmap(str(path))
-        if pixmap.isNull():
-            QMessageBox.warning(self, "Aperçu impossible", "Ce format d'image ne peut pas être affiché.")
-            return
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(path.name)
-        dialog.resize(900, 700)
-        layout = QVBoxLayout(dialog)
-        image_label = QLabel()
-        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setPixmap(pixmap.scaled(
-            860, 610,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        ))
-        image_scroll = QScrollArea()
-        image_scroll.setWidgetResizable(True)
-        image_scroll.setWidget(image_label)
-        layout.addWidget(image_scroll)
-        details = QLabel(f"{path.name}  •  {pixmap.width()} × {pixmap.height()} px")
-        details.setStyleSheet("color:#A6D3DC;")
-        layout.addWidget(details)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(dialog.reject)
-        buttons.accepted.connect(dialog.accept)
-        layout.addWidget(buttons)
-        dialog.exec()
+        open_attachment_preview(self.attachments[index]["path"], self)
 
     def open_attachment(self, index):
         if not 0 <= index < len(self.attachments):
@@ -1296,49 +1273,10 @@ class JarvisWindow(QMainWindow):
             if size > 8_000_000:
                 raise ValueError(f"{path.name} dépasse la limite de 8 Mo.")
             suffix = path.suffix.lower()
-            if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}:
+            if suffix in IMAGE_EXTENSIONS:
                 images.append(base64.b64encode(path.read_bytes()).decode("ascii"))
-            elif suffix == ".pdf":
-                try:
-                    from pypdf import PdfReader
-                    reader = PdfReader(str(path))
-                    extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
-                except ImportError:
-                    extracted = "[PDF joint : installez pypdf pour extraire son texte.]"
-                texts.append(f"\n\n--- Fichier : {path.name} ---\n{extracted[:30000]}")
-            elif suffix == ".docx":
-                try:
-                    from docx import Document
-                    document = Document(str(path))
-                    chunks = [paragraph.text for paragraph in document.paragraphs]
-                    for table in document.tables:
-                        for row in table.rows:
-                            chunks.append(" | ".join(cell.text for cell in row.cells))
-                    extracted = "\n".join(chunks)
-                except ImportError:
-                    extracted = "[DOCX joint : installez python-docx pour en extraire le texte.]"
-                texts.append(f"\n\n--- Fichier : {path.name} ---\n{extracted[:30000]}")
-            elif suffix == ".xlsx":
-                try:
-                    from openpyxl import load_workbook
-                    workbook = load_workbook(str(path), read_only=True, data_only=True)
-                    chunks = []
-                    for sheet in workbook.worksheets:
-                        chunks.append(f"[Feuille : {sheet.title}]")
-                        for row in sheet.iter_rows(values_only=True):
-                            values = ["" if value is None else str(value) for value in row]
-                            if any(values):
-                                chunks.append(" | ".join(values))
-                    workbook.close()
-                    extracted = "\n".join(chunks)
-                except ImportError:
-                    extracted = "[XLSX joint : installez openpyxl pour en extraire le contenu.]"
-                texts.append(f"\n\n--- Fichier : {path.name} ---\n{extracted[:30000]}")
-            elif suffix in {".txt", ".md", ".py", ".json", ".csv", ".xml", ".html", ".htm", ".css", ".js", ".log", ".yaml", ".yml", ".ini"}:
-                try:
-                    extracted = path.read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    extracted = path.read_text(encoding="utf-8-sig", errors="replace")
+            elif suffix in TEXT_EXTENSIONS or suffix in {".pdf", ".docx", ".xlsx"}:
+                extracted = extract_attachment_text(path)
                 texts.append(f"\n\n--- Fichier : {path.name} ---\n{extracted[:30000]}")
             else:
                 texts.append(
@@ -1361,15 +1299,22 @@ class JarvisWindow(QMainWindow):
             QMessageBox.warning(self, "Fichier non chargé", str(exc))
             return
         if self.attachments:
+            visible_prompt = prompt or "Pièce jointe"
             names = ", ".join(item["name"] for item in self.attachments)
-            visible_prompt = (prompt or "Analyse les fichiers joints.") + f"\n\n📎 {names}"
             prompt = (prompt or "Analyse les fichiers joints.") + f"\n\nFichiers joints : {names}" + attachment_text
         else:
             visible_prompt = prompt
-        self.add_message(visible_prompt, "user")
+        sent_attachments = [
+            {"path": str(Path(item["path"]).resolve()), "name": item["name"]}
+            for item in self.attachments
+        ]
+        user_bubble = self.add_message(visible_prompt, "user")
+        if sent_attachments:
+            user_bubble.add_attachments(sent_attachments)
         self.current_conversation["messages"].append({
             "role": "user",
             "content": visible_prompt,
+            "attachments": sent_attachments,
         })
         self._persist_current_conversation()
         self.input.clear()

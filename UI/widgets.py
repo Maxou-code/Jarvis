@@ -1,13 +1,101 @@
 import json
+import shutil
+from pathlib import Path
 
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
-                             QToolButton, QVBoxLayout, QWidget)
+from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtWidgets import (
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+)
 
+from UI.attachment_preview import (
+    IMAGE_EXTENSIONS, create_attachment_button, open_attachment_preview,
+)
 from UI.chart_view import InlineChart
 from UI.markdown_view import MarkdownWebView, render_markdown
 from UI.viewer3d import Inline3DViewer
+
+
+class ChatAttachmentCard(QFrame):
+    def __init__(self, attachment, parent=None):
+        super().__init__(parent)
+        self.path = Path(attachment.get("path", ""))
+        self.is_image = self.path.suffix.lower() in IMAGE_EXTENSIONS
+        self.setStyleSheet("""
+            QFrame { background:#081923; border:1px solid #145064; border-radius:7px; }
+            QLabel { color:#D7F8FF; border:none; background:transparent; }
+            QPushButton {
+                background:#0D2A37; color:#C9D7E8; border:1px solid #176078;
+                border-radius:6px; padding:4px;
+            }
+            QPushButton:hover { background:#145064; }
+        """)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(7, 5, 7, 5)
+        row.setSpacing(8)
+
+        self.preview = QLabel()
+        self.preview.setFixedSize(48, 48)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setStyleSheet("background:#0A202B; border-radius:5px;")
+        if self.is_image and self.path.is_file():
+            pixmap = QPixmap(str(self.path))
+            if not pixmap.isNull():
+                self.preview.setPixmap(pixmap.scaled(
+                    self.preview.width() - 4, self.preview.height() - 4,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+            else:
+                self.preview.setText("IMAGE")
+        else:
+            self.preview.setText(self.path.suffix.upper().lstrip(".")[:5] or "FICHIER")
+        row.addWidget(self.preview)
+
+        name = QLabel(str(attachment.get("name") or self.path.name))
+        name.setToolTip(str(self.path))
+        name.setMinimumWidth(0)
+        name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        name.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(name, 1)
+
+        open_button = create_attachment_button(
+            "Icons/arrow-up-right-from-square-solid-full.svg",
+            "Ouvrir en grand",
+            self,
+        )
+        open_button.clicked.connect(self.open_attachment)
+        row.addWidget(open_button)
+        save_button = create_attachment_button(
+            "Icons/download-solid-full.svg",
+            "Télécharger / enregistrer une copie",
+            self,
+        )
+        save_button.clicked.connect(self.save_attachment)
+        row.addWidget(save_button)
+
+    def open_attachment(self):
+        open_attachment_preview(self.path, self)
+
+    def save_attachment(self):
+        if not self.path.is_file():
+            QMessageBox.warning(self, "Téléchargement impossible", "Le fichier source n'existe plus.")
+            return
+        destination, _ = QFileDialog.getSaveFileName(
+            self, "Enregistrer une copie du fichier",
+            str(Path.home() / self.path.name), "Tous les fichiers (*)",
+        )
+        if not destination:
+            return
+        target = Path(destination)
+        if target.resolve() == self.path.resolve():
+            QMessageBox.information(self, "Copie inutile", "Le fichier est déjà à cet emplacement.")
+            return
+        try:
+            shutil.copy2(self.path, target)
+        except OSError as exc:
+            QMessageBox.warning(self, "Échec de la copie", str(exc))
 
 
 class ChartPreview(QFrame):
@@ -229,6 +317,13 @@ class MarkdownMessage(QFrame):
         self.extra_widgets.append(widget)
         self._fit()
         return widget
+
+    def add_attachments(self, attachments):
+        for attachment in attachments:
+            widget = ChatAttachmentCard(attachment, self)
+            self.layout.addWidget(widget)
+            self.extra_widgets.append(widget)
+        self._fit()
 
     def set_available_width(self, width):
         self.available_width = max(0, int(width))

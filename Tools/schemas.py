@@ -57,7 +57,47 @@ tools = [
     make_tool("knowledge_save", "Enregistre une connaissance persistante. Ne jamais stocker de secrets.", {"title":string_prop("Titre."),"content":string_prop("Information à conserver."),"tags":string_prop("Mots-clés.")},["title","content"]),
     make_tool("knowledge_search", "Recherche dans la base persistante.", {"query":string_prop("Sujet à retrouver."),"limit":{"type":"integer","description":"1 à 20 résultats."}},["query"]),
     make_tool("knowledge_list", "Liste les connaissances persistantes.", {"limit":{"type":"integer","description":"1 à 100 résultats."}},[]),
-    make_tool("plot_chart", "Affiche un graphique natif dans la conversation.", {"title":string_prop("Titre."),"x_values":{"type":"array","items":{"type":"string"},"description":"Libellés X."},"y_values":{"type":"array","items":{"type":"number"},"description":"Valeurs Y."},"chart_type":{"type":"string","enum":["line","bar"]},"x_label":string_prop("Axe X."),"y_label":string_prop("Axe Y.")},["title","x_values","y_values"]),
+    make_tool(
+        "plot_chart",
+        "Affiche un graphique natif dans la conversation. Pour plusieurs courbes, "
+        "fournis series avec un nom et y_values par série ; toutes partagent x_values.",
+        {
+            "title": string_prop("Titre."),
+            "x_values": {
+                "type": "array",
+                "items": {"oneOf": [{"type": "number"}, {"type": "string"}]},
+                "description": "Valeurs X communes, numériques, expressions ou libellés texte.",
+            },
+            "y_values": {
+                "type": "array",
+                "items": {"oneOf": [{"type": "number"}, {"type": "string"}]},
+                "description": "Valeurs Y pour une seule série (format simple historique).",
+            },
+            "series": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "description": "Une à huit séries partageant x_values.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": string_prop("Nom affiché dans la légende."),
+                        "y_values": {
+                            "type": "array",
+                            "items": {"oneOf": [{"type": "number"}, {"type": "string"}]},
+                            "description": "Valeurs Y, une par valeur X.",
+                        },
+                    },
+                    "required": ["name", "y_values"],
+                    "additionalProperties": False,
+                },
+            },
+            "chart_type": {"type": "string", "enum": ["line", "bar"]},
+            "x_label": string_prop("Axe X."),
+            "y_label": string_prop("Axe Y."),
+        },
+        ["title", "x_values"],
+    ),
     make_tool(
         "create_3d_model",
         "Crée une pièce mécanique 3D avec CadQuery et l'affiche dans la conversation. "

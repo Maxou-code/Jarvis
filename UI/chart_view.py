@@ -1,11 +1,64 @@
 import math
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 class InlineChart(QWidget):
     """Graphique Qt avec axes numériques proportionnels et info-bulles."""
+
+    @staticmethod
+    def _smooth_path(points):
+        path = QPainterPath()
+        if not points:
+            return path
+
+        path.moveTo(*points[0])
+        if len(points) == 1:
+            return path
+
+        def tangents(values):
+            secants = [
+                values[index + 1] - values[index]
+                for index in range(len(values) - 1)
+            ]
+            if len(secants) == 1:
+                return [secants[0], secants[0]]
+
+            def endpoint(first, second):
+                slope = (3 * first - second) / 2
+                if slope * first <= 0:
+                    return 0
+                if first * second < 0 and abs(slope) > abs(3 * first):
+                    return 3 * first
+                return slope
+
+            result = [endpoint(secants[0], secants[1])]
+            for previous, following in zip(secants, secants[1:]):
+                if previous * following <= 0:
+                    result.append(0)
+                else:
+                    result.append(2 * previous * following / (previous + following))
+            result.append(endpoint(secants[-1], secants[-2]))
+            return result
+
+        x_values = [point[0] for point in points]
+        y_values = [point[1] for point in points]
+        x_tangents = tangents(x_values)
+        y_tangents = tangents(y_values)
+
+        for index in range(len(points) - 1):
+            first_x, first_y = points[index]
+            second_x, second_y = points[index + 1]
+            path.cubicTo(
+                first_x + x_tangents[index] / 3,
+                first_y + y_tangents[index] / 3,
+                second_x - x_tangents[index + 1] / 3,
+                second_y - y_tangents[index + 1] / 3,
+                second_x,
+                second_y,
+            )
+        return path
 
     def __init__(self, data, parent=None):
         super().__init__(parent)
@@ -24,6 +77,7 @@ class InlineChart(QWidget):
         self.setMouseTracking(True)
 
         self._hover_index = None
+        self._hover_series_index = None
         self._chart_points = []
         self._plot_rect = None
 
@@ -99,52 +153,97 @@ class InlineChart(QWidget):
 
             labels = self.data.get("x_values", [])
             y_values = self.data.get("y_values", [])
+            x_display_labels = self.data.get("x_display_labels", labels)
+            raw_series = self.data.get("series")
 
             if (
                 not isinstance(labels, list)
-                or not isinstance(y_values, list)
-                or not y_values
-                or len(labels) != len(y_values)
-                or len(y_values) > 100
+                or not isinstance(x_display_labels, list)
+                or len(x_display_labels) != len(labels)
+                or not labels
+                or len(labels) > 100
             ):
                 painter.setPen(QColor("#D7F8FF"))
                 painter.drawText(12, 28, "Données du graphique invalides")
                 self._chart_points = []
                 return
 
+            if raw_series is None:
+                raw_series = [{
+                    "name": "",
+                    "y_values": y_values,
+                    "y_display_labels": self.data.get("y_display_labels", y_values),
+                }]
+            if not isinstance(raw_series, list) or not 1 <= len(raw_series) <= 8:
+                painter.setPen(QColor("#D7F8FF"))
+                painter.drawText(12, 28, "Données du graphique invalides")
+                self._chart_points = []
+                return
+
+            series_data = []
             try:
-                y_numeric = [float(v) for v in y_values]
-
-                if not all(math.isfinite(v) for v in y_numeric):
-                    raise ValueError()
-
-                x_numeric = [float(v) for v in labels]
-
-                if not all(math.isfinite(v) for v in x_numeric):
-                    raise ValueError()
-
-                numeric_x = True
-
+                for index, item in enumerate(raw_series):
+                    if not isinstance(item, dict):
+                        raise ValueError()
+                    values = item.get("y_values")
+                    display_labels = item.get("y_display_labels", values)
+                    if (
+                        not isinstance(values, list)
+                        or not isinstance(display_labels, list)
+                        or len(values) != len(labels)
+                        or len(display_labels) != len(values)
+                    ):
+                        raise ValueError()
+                    numeric_values = [float(value) for value in values]
+                    if not all(math.isfinite(value) for value in numeric_values):
+                        raise ValueError()
+                    series_data.append({
+                        "name": str(item.get("name") or f"Série {index + 1}")[:40],
+                        "values": numeric_values,
+                        "display_labels": display_labels,
+                    })
             except (TypeError, ValueError, OverflowError):
-                numeric_x = False
-                x_numeric = []
-
-            if not all(math.isfinite(v) for v in y_numeric):
                 painter.setPen(QColor("#D7F8FF"))
                 painter.drawText(12, 28, "Valeurs Y invalides")
                 self._chart_points = []
                 return
+
+            y_numeric = [value for item in series_data for value in item["values"]]
+            y_display_labels = [
+                label for item in series_data for label in item["display_labels"]
+            ]
+            x_numeric = []
+            axis_type = self.data.get("x_axis_type")
+            if axis_type == "category":
+                numeric_x = False
+            else:
+                try:
+                    x_numeric = [float(v) for v in labels]
+
+                    if not all(math.isfinite(v) for v in x_numeric):
+                        raise ValueError()
+
+                    numeric_x = axis_type == "numeric" or axis_type is None
+
+                except (TypeError, ValueError, OverflowError):
+                    numeric_x = False
+                    x_numeric = []
 
             # --------------------------------------------------
             # DIMENSIONS
             # --------------------------------------------------
 
             left = 65
-            top = 45
             right = width - 20
             bottom = height - 65
-
             plot_width = max(1, right - left)
+            legend_columns = max(1, min(4, plot_width // 150))
+            legend_rows = (
+                math.ceil(len(series_data) / legend_columns)
+                if len(series_data) > 1 else 0
+            )
+            top = 45 + legend_rows * 18
+
             plot_height = max(1, bottom - top)
 
             self._plot_rect = (left, top, right, bottom)
@@ -181,6 +280,12 @@ class InlineChart(QWidget):
             y_low, y_high, y_step, y_ticks = self.nice_scale(
                 y_min, y_max, 6
             )
+
+            def tick_label(tick, values, display_labels):
+                for value, label in zip(values, display_labels):
+                    if math.isclose(tick, value, rel_tol=1e-10, abs_tol=1e-10):
+                        return str(label)[:10]
+                return f"{tick:g}"
 
             # X : numérique si possible
             if numeric_x:
@@ -245,7 +350,7 @@ class InlineChart(QWidget):
                     3, int(y + 4),
                     left - 12, 16,
                     Qt.AlignmentFlag.AlignRight,
-                    f"{tick:g}"
+                    tick_label(tick, y_numeric, y_display_labels)
                 )
 
             # --------------------------------------------------
@@ -268,9 +373,9 @@ class InlineChart(QWidget):
                 painter.setPen(QColor("#79A8B5"))
 
                 if numeric_x:
-                    label = f"{tick:g}"
+                    label = tick_label(tick, x_numeric, x_display_labels)
                 else:
-                    label = str(labels[int(tick)])[:10]
+                    label = str(x_display_labels[int(tick)])[:10]
 
                 painter.drawText(
                     int(x) - 30,
@@ -295,24 +400,42 @@ class InlineChart(QWidget):
             # DONNÉES
             # --------------------------------------------------
 
-            points = [
-                point(index, value)
-                for index, value in enumerate(y_numeric)
+            points_by_series = [
+                [
+                    point(index, value)
+                    for index, value in enumerate(item["values"])
+                ]
+                for item in series_data
             ]
-
             self._chart_points = [
-                (x, y, index)
+                (x, y, index, series_index)
+                for series_index, points in enumerate(points_by_series)
                 for index, (x, y) in enumerate(points)
             ]
+            colors = [
+                QColor(color) for color in (
+                    "#28D9F5", "#FF9F43", "#A78BFA", "#4ADE80",
+                    "#FB7185", "#FACC15", "#60A5FA", "#2DD4BF",
+                )
+            ]
+            if len(series_data) > 1:
+                painter.setFont(QFont("Segoe UI", 8))
+                for index, item in enumerate(series_data):
+                    column = index % legend_columns
+                    row = index // legend_columns
+                    legend_x = left + column * (plot_width // legend_columns)
+                    legend_y = 44 + row * 18
+                    painter.setPen(QPen(colors[index], 3))
+                    painter.drawLine(legend_x, legend_y - 3, legend_x + 16, legend_y - 3)
+                    painter.setPen(QColor("#A6D3DC"))
+                    label = item["name"]
+                    painter.drawText(legend_x + 21, legend_y, label[:20])
 
             # --------------------------------------------------
             # GRAPHIQUE EN BARRES
             # --------------------------------------------------
 
             if chart_type == "bar":
-
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor("#00C8F0"))
 
                 zero_y = bottom - (
                     (0.0 - y_low) / (y_high - y_low)
@@ -338,53 +461,42 @@ class InlineChart(QWidget):
                     ) * plot_width
 
                 else:
-                    slot = plot_width / max(1, len(y_numeric))
+                    slot = plot_width / max(1, len(labels))
 
-                for index, value in enumerate(y_numeric):
-                    x, y = points[index]
-
-                    bar_width = max(
-                        2, int(slot * 0.64)
-                    )
-
-                    bar_height = max(
-                        2, abs(int(zero_y) - y)
-                    )
-
-                    painter.drawRoundedRect(
-                        int(x - bar_width / 2),
-                        int(min(y, zero_y)),
-                        bar_width,
-                        bar_height,
-                        4, 4
-                    )
+                group_width = slot * 0.72
+                bar_width = max(2, int(group_width / len(series_data)))
+                painter.setPen(Qt.PenStyle.NoPen)
+                for series_index, (item, points) in enumerate(
+                    zip(series_data, points_by_series)
+                ):
+                    painter.setBrush(colors[series_index])
+                    for index, value in enumerate(item["values"]):
+                        x, y = points[index]
+                        offset = (
+                            series_index - (len(series_data) - 1) / 2
+                        ) * bar_width
+                        bar_height = max(2, abs(int(zero_y) - y))
+                        painter.drawRoundedRect(
+                            int(x - bar_width / 2 + offset),
+                            int(min(y, zero_y)),
+                            bar_width,
+                            bar_height,
+                            3, 3
+                        )
 
             # --------------------------------------------------
             # GRAPHIQUE LINÉAIRE
             # --------------------------------------------------
 
             else:
-                painter.setPen(
-                    QPen(QColor("#28D9F5"), 3)
-                )
-
-                for first, second in zip(
-                    points, points[1:]
-                ):
-                    painter.drawLine(
-                        first[0], first[1],
-                        second[0], second[1]
-                    )
-
-                painter.setBrush(QColor("#E4FCFF"))
-                painter.setPen(
-                    QPen(QColor("#28D9F5"), 1)
-                )
-
-                for x, y in points:
-                    painter.drawEllipse(
-                        x - 4, y - 4, 8, 8
-                    )
+                for series_index, points in enumerate(points_by_series):
+                    color = colors[series_index]
+                    painter.setPen(QPen(color, 3))
+                    painter.drawPath(self._smooth_path(points))
+                    painter.setBrush(QColor("#E4FCFF"))
+                    painter.setPen(QPen(color, 1))
+                    for x, y in points:
+                        painter.drawEllipse(x - 4, y - 4, 8, 8)
 
             # --------------------------------------------------
             # RÉTICULE ET INFO-BULLE
@@ -392,14 +504,17 @@ class InlineChart(QWidget):
 
             if self._hover_index is not None:
                 index = self._hover_index
+                series_index = self._hover_series_index or 0
+                points = points_by_series[series_index]
 
                 if 0 <= index < len(points):
                     px, py = points[index]
+                    color = colors[series_index]
 
                     # Réticule
                     painter.setPen(
                         QPen(
-                            QColor("#28D9F5"),
+                            color,
                             1,
                             Qt.PenStyle.DashLine
                         )
@@ -411,7 +526,7 @@ class InlineChart(QWidget):
                     # Point sélectionné
                     painter.setBrush(QColor("#FFFFFF"))
                     painter.setPen(
-                        QPen(QColor("#28D9F5"), 2)
+                        QPen(color, 2)
                     )
 
                     painter.drawEllipse(
@@ -419,8 +534,8 @@ class InlineChart(QWidget):
                     )
 
                     # Bulle
-                    bubble_width = 135
-                    bubble_height = 52
+                    bubble_width = 175
+                    bubble_height = 68 if len(series_data) > 1 else 52
 
                     bx = px + 14
                     by = py - bubble_height - 12
@@ -442,7 +557,7 @@ class InlineChart(QWidget):
                     )
 
                     painter.setPen(
-                        QPen(QColor("#28D9F5"), 1)
+                        QPen(color, 1)
                     )
 
                     painter.setBrush(QColor("#0B202C"))
@@ -453,8 +568,7 @@ class InlineChart(QWidget):
                         7, 7
                     )
 
-                    # Coordonnées réelles
-                    x_label = labels[index]
+                    x_label = x_display_labels[index]
 
                     painter.setFont(
                         QFont(
@@ -470,10 +584,19 @@ class InlineChart(QWidget):
                         f"X: {str(x_label)[:20]}"
                     )
 
+                    value_y = by + 40
+                    if len(series_data) > 1:
+                        painter.setPen(color)
+                        painter.drawText(
+                            int(bx + 9), int(value_y),
+                            series_data[series_index]["name"][:24]
+                        )
+                        painter.setPen(QColor("#91BAC5"))
+                        value_y += 20
                     painter.drawText(
                         int(bx + 9),
-                        int(by + 40),
-                        f"Y: {y_numeric[index]:g}"
+                        int(value_y),
+                        f"Y: {series_data[series_index]['display_labels'][index]}"
                     )
 
             # --------------------------------------------------
@@ -549,7 +672,8 @@ class InlineChart(QWidget):
         closest_index = None
         closest_distance = 12 ** 2
 
-        for x, y, index in self._chart_points:
+        closest_series_index = None
+        for x, y, index, series_index in self._chart_points:
             distance = (
                 (mouse_x - x) ** 2
                 + (mouse_y - y) ** 2
@@ -558,12 +682,18 @@ class InlineChart(QWidget):
             if distance < closest_distance:
                 closest_distance = distance
                 closest_index = index
+                closest_series_index = series_index
 
-        if closest_index != self._hover_index:
+        if (
+            closest_index != self._hover_index
+            or closest_series_index != self._hover_series_index
+        ):
             self._hover_index = closest_index
+            self._hover_series_index = closest_series_index
             self.update()
 
     def leaveEvent(self, event):
         self._hover_index = None
+        self._hover_series_index = None
         self.update()
         super().leaveEvent(event)
